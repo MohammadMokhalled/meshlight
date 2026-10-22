@@ -3,4 +3,5 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(meshlight)
 
-target_sources(app PRIVATE src/main.c)
+# Keep staged per-LED state and gamma-corrected rendering behind the lighting API.
+target_sources(app PRIVATE src/main.c src/lighting.c)

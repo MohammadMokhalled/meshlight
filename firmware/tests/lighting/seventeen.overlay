@@ -1,0 +1,4 @@
+/* Exercise a non-default length larger than the starter strip. */
+&fake_strip {
+	chain-length = <17>;
+};

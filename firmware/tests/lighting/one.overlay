@@ -1,0 +1,4 @@
+/* Verify that no rendering loop assumes the default six-pixel strip. */
+&fake_strip {
+	chain-length = <1>;
+};

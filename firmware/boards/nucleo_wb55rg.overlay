@@ -1,0 +1,49 @@
+#include <zephyr/dt-bindings/dma/stm32_dma.h>
+#include <zephyr/dt-bindings/led/led.h>
+
+/ {
+	aliases {
+		/* Reuse the same lighting module and six-pixel demo on this board. */
+		led-strip = &lighting_strip;
+	};
+};
+
+&spi1 {
+	status = "okay";
+	/* DIN: PA7 / Arduino D11 / CN5 pin 4. Leave PA5 / D13 unconnected. */
+	pinctrl-0 = <&spi1_sck_pa5 &spi1_mosi_pa7>;
+	pinctrl-names = "default";
+
+	/* DMAMUX requests 7/6 select SPI1 TX/RX on DMA1 channels 1/2. */
+	dmas = <&dmamux1 0 7 (STM32_DMA_PERIPH_TX | STM32_DMA_PRIORITY_HIGH)>,
+	       <&dmamux1 1 6 (STM32_DMA_PERIPH_RX | STM32_DMA_PRIORITY_HIGH)>;
+	dma-names = "tx", "rx";
+
+	lighting_strip: ws2812@0 {
+		compatible = "worldsemi,ws2812-spi";
+		reg = <0>;
+		/* One source of truth for the driver and application framebuffer. */
+		chain-length = <6>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
+		/*
+		 * The default 32 MHz APB2 clock divides exactly to 8 MHz.
+		 * Each WS2812 bit uses one byte: 11000000 for zero (250 ns high,
+		 * 750 ns low), 11111000 for one (625 ns high, 375 ns low).
+		 * DMA keeps the encoded bytes in one continuous transfer.
+		 */
+		spi-max-frequency = <8000000>;
+		bits-per-symbol = <8>;
+		spi-zero-frame = <0xc0>;
+		spi-one-frame = <0xf8>;
+		reset-delay = <300>;
+	};
+};
+
+/* Only DMA1 is needed for the two selected DMAMUX channels. */
+&dma1 {
+	status = "okay";
+};
+
+&dmamux1 {
+	status = "okay";
+};
