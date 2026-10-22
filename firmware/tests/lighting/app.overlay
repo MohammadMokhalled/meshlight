@@ -1,0 +1,14 @@
+#include <zephyr/dt-bindings/led/led.h>
+
+/ {
+	aliases {
+		led-strip = &fake_strip;
+	};
+
+	/* A real Zephyr device API, with transfer recording instead of SPI. */
+	fake_strip: led-strip {
+		compatible = "vnd,meshlight-led-strip";
+		chain-length = <6>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
+	};
+};

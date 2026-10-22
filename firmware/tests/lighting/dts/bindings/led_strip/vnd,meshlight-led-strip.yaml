@@ -1,0 +1,3 @@
+description: Test-only RGB strip for lighting transfer and failure checks
+compatible: "vnd,meshlight-led-strip"
+include: led-strip.yaml

@@ -1,0 +1,16 @@
+common:
+  tags:
+    - lighting
+    - led_strip
+  integration_platforms:
+    - native_sim/native/64
+  platform_allow:
+    - native_sim/native/64
+    - qemu_cortex_m3
+  harness: ztest
+  timeout: 60
+tests:
+  meshlight.lighting_refresh.default: {}
+  meshlight.lighting_refresh.custom_interval:
+    extra_configs:
+      - CONFIG_LIGHTING_REFRESH_INTERVAL_MS=20

@@ -1,0 +1,20 @@
+common:
+  tags:
+    - lighting
+    - led_strip
+  integration_platforms:
+    - native_sim/native/64
+  platform_allow:
+    - native_sim/native/64
+    - qemu_cortex_m3
+    - nrf54l15dk/nrf54l15/cpuapp
+    - nucleo_wb55rg/stm32wb55xx
+  harness: ztest
+tests:
+  meshlight.lighting.six: {}
+  meshlight.lighting.one:
+    extra_args:
+      - EXTRA_DTC_OVERLAY_FILE=one.overlay
+  meshlight.lighting.seventeen:
+    extra_args:
+      - EXTRA_DTC_OVERLAY_FILE=seventeen.overlay
