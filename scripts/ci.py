@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Shared CI preparation, product inventory, packaging, and test-report checks."""
 
 import argparse
@@ -78,7 +80,10 @@ def package(build_dir, output_dir, product, info, dependencies=None):
     name = f"meshlight-{product}-{info['version']}"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    payload = {}
+    license_path = ROOT / "LICENSE"
+    if not license_path.is_file() or not license_path.stat().st_size:
+        raise ValueError("Missing or empty project license")
+    payload = {"LICENSE": license_path.read_bytes()}
     for extension in ("hex", "bin", "elf"):
         source = Path(build_dir) / "zephyr" / f"zephyr.{extension}"
         if not source.is_file() or not source.stat().st_size:

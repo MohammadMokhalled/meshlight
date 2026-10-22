@@ -121,7 +121,7 @@ actionlint .github/workflows/ci.yml .github/workflows/pr.yml .github/workflows/f
 From a shell providing Perl and `diff`:
 
 ```sh
-perl "$ZEPHYR_BASE/scripts/checkpatch.pl" --no-tree --ignore SPDX_LICENSE_TAG --file \
+perl "$ZEPHYR_BASE/scripts/checkpatch.pl" --no-tree --file \
   firmware/src/lighting.c firmware/src/lighting.h \
   firmware/src/lighting_gamma_table.h firmware/src/main.c \
   firmware/Kconfig firmware/tests/lighting/src/main.c \
@@ -129,8 +129,8 @@ perl "$ZEPHYR_BASE/scripts/checkpatch.pl" --no-tree --ignore SPDX_LICENSE_TAG --
 git diff --check
 ```
 
-Only the missing-license-tag check is excluded: a project license has not been
-selected, and project files currently have no SPDX declarations.
+Project sources use the `SPDX-License-Identifier: MIT` declaration; the complete
+license is in [LICENSE](../LICENSE). License-tag checks are enabled.
 `git diff --check` checks tracked changes; also inspect newly added files for
 whitespace before committing.
 

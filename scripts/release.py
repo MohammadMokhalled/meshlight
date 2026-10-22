@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Publish complete, validated final releases; never overwrite published assets."""
 
 import argparse
@@ -49,7 +51,9 @@ def validate_packages(directory, info):
                 if details.get(key) != info.get(key):
                     raise ValueError(f"Mismatched {key} in {path.name}")
             stem = path.stem
-            payload_names = {f"{stem}.{ext}" for ext in ("hex", "bin", "elf")} | {"build-metadata.json"}
+            payload_names = {f"{stem}.{ext}" for ext in ("hex", "bin", "elf")} | {
+                "build-metadata.json", "LICENSE"
+            }
             if set(names) != payload_names | {"SHA256SUMS"}:
                 raise ValueError(f"Unexpected package contents in {path.name}")
             checksums = {}

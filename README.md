@@ -108,4 +108,7 @@ work. The current demo continuously writes lighting state; replace its loop when
 integrating another control source. Gamma 2.2 is fixed, and small nonzero values
 can round to black with eight-bit output.
 
-A project license has not yet been selected; this repository has no `LICENSE` file.
+## License
+
+Licensed under the [MIT License](LICENSE). SDK and other third-party dependencies
+retain their own licenses.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  * @file
  * @brief Private per-LED selections and one gamma-corrected strip output path.

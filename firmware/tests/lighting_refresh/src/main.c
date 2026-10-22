@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /** @file Automatic refresh tests with timestamped, synchronized fake transfers. */
 
 #include <errno.h>

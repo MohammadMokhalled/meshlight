@@ -97,9 +97,10 @@ behavior; physical strip validation remains in [testing](testing.md).
 Each firmware artifact contains `meshlight-<product>-<version>.zip`, with:
 
 - Versioned HEX, BIN, and ELF files.
+- `LICENSE`: the project's MIT license and copyright notice.
 - `build-metadata.json`: version, product, source/tree identity, PR parents when
   applicable, SDK/toolchain identity, dependency revisions, and CI run/attempt.
-- `SHA256SUMS` for the firmware files and metadata.
+- `SHA256SUMS` for the firmware files, license, and metadata.
 
 Packaging verifies the generated header and linked ELF contain the advertised
 version and source SHA. Available logs, Twister JSON, and JUnit XML are also

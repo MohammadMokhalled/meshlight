@@ -17,7 +17,21 @@ The lighting C example passed a syntax-only check using the compiler and headers
 from an existing nRF54L15-DK build. Firmware tests, full board builds, and
 physical checks were not rerun for this documentation-only change.
 
+## MIT license adoption — 2026-10-22
+
+Added the project MIT license, source SPDX declarations, and license inclusion
+in firmware packages. Package checksums cover the license, and release
+validation rejects packages that omit it.
+
+| Check | Result |
+| --- | --- |
+| Python tooling tests | 36 passed, including missing/empty license and missing packaged license checks |
+| Zephyr checkpatch, seven C/header/Kconfig files | Zero errors and warnings; license-tag checks enabled |
+| `git diff --check` | Passed |
+
 ## Automatic refresh validation — 2026-10-22
+
+This record predates adoption of the MIT license and SPDX declarations.
 
 Validation used the same nRF Connect SDK 3.3.0, Arm GCC 12.2.0, and QEMU 11.1.0
 environment as the earlier checks below. Only process-local SDK/Git settings

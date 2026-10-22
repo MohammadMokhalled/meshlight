@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /** @file Production lighting tests using a fake strip and fixed gamma vectors. */
 
 #include <errno.h>

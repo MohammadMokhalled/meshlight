@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 # Shared lighting options for the application and its production-module tests.
 mainmenu "Meshlight configuration"
 

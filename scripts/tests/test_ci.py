@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 import hashlib
 import json
 import sys
@@ -8,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ci import IMAGE, package, products, verify_twister, write_json
+from ci import IMAGE, ROOT, package, products, verify_twister, write_json
 from release import publish, validate_packages
 
 
@@ -43,9 +45,33 @@ class ArtifactTests(unittest.TestCase):
         with zipfile.ZipFile(paths[0]) as archive:
             details = json.loads(archive.read("build-metadata.json"))
             self.assertEqual(details["version"], "0.1.0")
+            self.assertEqual(archive.read("LICENSE"), (ROOT / "LICENSE").read_bytes())
             for line in archive.read("SHA256SUMS").decode().splitlines():
                 digest, name = line.split("  ", 1)
                 self.assertEqual(digest, hashlib.sha256(archive.read(name)).hexdigest())
+
+    def test_missing_or_empty_license_fails_packaging(self):
+        with patch("ci.ROOT", self.root):
+            with self.assertRaisesRegex(ValueError, "Missing or empty project license"):
+                self.packages()
+            (self.root / "LICENSE").write_bytes(b"")
+            with self.assertRaisesRegex(ValueError, "Missing or empty project license"):
+                self.packages()
+
+    def test_missing_license_blocks_publication(self):
+        archive = self.packages()[0]
+        with zipfile.ZipFile(archive) as bundle:
+            payload = {name: bundle.read(name) for name in bundle.namelist() if name != "LICENSE"}
+        payload["SHA256SUMS"] = b"".join(
+            line for line in payload["SHA256SUMS"].splitlines(keepends=True)
+            if not line.rstrip().endswith(b"  LICENSE")
+        )
+        with zipfile.ZipFile(archive, "w") as bundle:
+            for name, data in payload.items():
+                bundle.writestr(name, data)
+        with patch("release.gh") as mock, self.assertRaisesRegex(ValueError, "package contents"):
+            publish("owner/repo", self.info, self.output)
+        mock.assert_not_called()
 
     def test_missing_firmware_fails_packaging(self):
         (self.build / "zephyr/zephyr.bin").unlink()
