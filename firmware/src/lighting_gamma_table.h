@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 /**
  * @file
  * @brief Private gamma-2.2 table, indexed by an intensity-scaled RGB channel.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /** @file Application startup and a repeating uniform-strip lighting demo. */
 
 /*

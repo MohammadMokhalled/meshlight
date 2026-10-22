@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+
 """Resolve firmware versions from immutable source history, without editing it."""
 
 import argparse

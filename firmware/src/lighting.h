@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MIT */
+
 /**
  * @file
  * @brief Staged per-LED RGB and intensity control for a single strip.
