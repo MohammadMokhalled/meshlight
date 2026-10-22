@@ -1,0 +1,16 @@
+name: Set up pinned nRF Connect SDK
+description: Initialize the application west manifest inside the SDK toolchain container
+runs:
+  using: composite
+  steps:
+    - name: Fetch SDK sources
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        {
+          west init -l meshlight
+          west update -o=--depth=1 -n
+          west zephyr-export
+          python3 meshlight/scripts/ci.py dependencies --output meshlight/build/dependencies.json
+        } 2>&1 | tee meshlight/build/sdk.log
+        echo "ZEPHYR_BASE=$GITHUB_WORKSPACE/zephyr" >> "$GITHUB_ENV"

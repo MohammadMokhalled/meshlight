@@ -11,6 +11,7 @@
 #include <zephyr/sys/util.h>
 
 #include "lighting.h"
+#include "meshlight_version.h"
 
 /*
  * ============================================================================
@@ -57,7 +58,10 @@ int main(void)
 	/* Signed arithmetic lets the same accumulator dim down without wrapping. */
 	int intensity_step = DEMO_INTENSITY_STEP;
 	size_t color_index = 0;
-	int err = lighting_init();
+	int err;
+
+	LOG_INF("Meshlight %s (%s)", MESHLIGHT_VERSION_STRING, MESHLIGHT_GIT_SHA);
+	err = lighting_init();
 
 	if (err != 0) {
 		LOG_ERR("Lighting initialization failed (%d)", err);

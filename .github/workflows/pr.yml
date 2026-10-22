@@ -1,0 +1,30 @@
+name: Pull request validation
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    uses: ./.github/workflows/firmware.yml
+    with:
+      source-sha: ${{ github.sha }}
+      source-ref: refs/heads/master
+      base-sha: ${{ github.event.pull_request.base.sha }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      pr-number: ${{ format('{0}', github.event.pull_request.number) }}
+
+  required:
+    name: PR CI
+    if: ${{ always() }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all product builds and tests
+        env:
+          RESULT: ${{ needs.validate.result }}
+        run: test "$RESULT" = success

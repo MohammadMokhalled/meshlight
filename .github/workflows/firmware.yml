@@ -1,0 +1,208 @@
+name: Shared firmware validation
+
+on:
+  workflow_call:
+    inputs:
+      source-sha:
+        type: string
+        required: true
+      source-ref:
+        type: string
+        required: true
+      base-sha:
+        type: string
+        default: ''
+      head-sha:
+        type: string
+        default: ''
+      pr-number:
+        type: string
+        default: ''
+    outputs:
+      version:
+        value: ${{ jobs.metadata.outputs.version }}
+      channel:
+        value: ${{ jobs.metadata.outputs.channel }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  metadata:
+    name: Version and source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      channel: ${{ steps.metadata.outputs.channel }}
+      matrix: ${{ steps.metadata.outputs.matrix }}
+      image: ${{ steps.metadata.outputs.image }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prepare exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}"
+      - name: Test CI tooling
+        run: python3 -m unittest discover -s meshlight/scripts/tests -v
+      - name: Resolve workflow version and products
+        id: metadata
+        env:
+          SOURCE_REF: ${{ inputs.source-ref }}
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then
+            args+=(--base "$BASE_SHA" --head "$HEAD_SHA" --pr-number "$PR_NUMBER")
+          fi
+          python3 meshlight/scripts/ci.py metadata --ref "$SOURCE_REF" "${args[@]}" \
+            --output meshlight/build/ci-metadata.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: build-metadata
+          path: meshlight/build/ci-metadata.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  build:
+    name: Build ${{ matrix.id }}
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      image: ${{ needs.metadata.outputs.image }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - uses: ./meshlight/.github/actions/setup-sdk
+      - name: Build firmware
+        env:
+          PRODUCT: ${{ matrix.id }}
+          BOARD: ${{ matrix.board }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["version"])')
+          source_sha=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["source_commit"])')
+          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT" meshlight/firmware -- \
+            "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
+            2>&1 | tee "meshlight/build/$PRODUCT.log"
+      - name: Package firmware
+        env:
+          PRODUCT: ${{ matrix.id }}
+        run: |
+          python3 meshlight/scripts/ci.py package --metadata meshlight/build/ci-metadata.json \
+            --product "$PRODUCT" --build-dir "meshlight/build/$PRODUCT" \
+            --dependencies meshlight/build/dependencies.json --output-dir meshlight/build/packages
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: meshlight-${{ matrix.id }}-${{ needs.metadata.outputs.version }}
+          path: meshlight/build/packages/*.zip
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+      - name: Upload build diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: logs-${{ matrix.id }}
+          include-hidden-files: true
+          overwrite: true
+          path: |
+            meshlight/build/*.log
+            meshlight/build/${{ matrix.id }}/CMakeFiles/CMakeConfigureLog.yaml
+            meshlight/build/${{ matrix.id }}/zephyr/.config
+            meshlight/build/dependencies.json
+          retention-days: 30
+
+  tests:
+    name: Zephyr tests
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      image: ${{ needs.metadata.outputs.image }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - uses: ./meshlight/.github/actions/setup-sdk
+      - name: Execute every Twister scenario
+        run: |
+          python3 "$ZEPHYR_BASE/scripts/twister" -T meshlight/firmware/tests -p qemu_cortex_m3 \
+            --inline-logs --outdir meshlight/build/twister 2>&1 | tee meshlight/build/twister.log
+          python3 meshlight/scripts/ci.py verify-tests --report meshlight/build/twister/twister.json \
+            --expected meshlight/build/twister/testplan.json
+      - name: Upload test reports and diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zephyr-test-results
+          overwrite: true
+          path: |
+            meshlight/build/sdk.log
+            meshlight/build/twister.log
+            meshlight/build/twister/*.json
+            meshlight/build/twister/*.xml
+            meshlight/build/twister/**/*.log
+          retention-days: 30
+
+  complete:
+    name: All firmware checks
+    if: ${{ always() }}
+    needs: [metadata, build, tests]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every validation job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 -c 'import json, os, sys; jobs=json.loads(os.environ["RESULTS"]); print(jobs); sys.exit(0 if all(j["result"] == "success" for j in jobs.values()) else 1)'

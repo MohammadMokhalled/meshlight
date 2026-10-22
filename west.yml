@@ -1,0 +1,12 @@
+manifest:
+  version: "0.13"
+  projects:
+    - name: nrf
+      url: https://github.com/nrfconnect/sdk-nrf
+      revision: ba167d9f3db4abbdc9b67887ca3ea66c64f2d956 # v3.3.0
+      import: true
+    # NCS excludes the STM32 MCU HAL from its imported Zephyr manifest.
+    - name: hal_stm32
+      url: https://github.com/zephyrproject-rtos/hal_stm32
+      revision: e05bb4707857ecf4344c29a9407aaa4227407546
+      path: modules/hal/stm32
