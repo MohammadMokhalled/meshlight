@@ -1,0 +1,40 @@
+# Shared lighting options for the application and its production-module tests.
+mainmenu "Meshlight configuration"
+
+source "Kconfig.zephyr"
+
+menu "Lighting"
+
+config LIGHTING_AUTO_REFRESH
+	bool "Automatically refresh the LED strip"
+	default y
+	depends on LED_STRIP && MULTITHREADING
+	select TIMEOUT_64BIT
+	select LOG_RATELIMIT if LOG
+	help
+	  Start a private lighting thread after successful lighting initialization.
+	  Setters update requested values, which appear on the next refresh.
+	  Disable to use synchronous lighting_apply() calls exclusively.
+	  Manual flushes remain available when the worker is enabled.
+
+if LIGHTING_AUTO_REFRESH
+
+config LIGHTING_REFRESH_INTERVAL_MS
+	int "Lighting refresh interval (milliseconds)"
+	default 50
+	range 1 1000
+	help
+	  Time between scheduled frame starts. Late transfers skip missed slots
+	  rather than queueing frames. This does not change WS2812 signal timing.
+
+config LIGHTING_REFRESH_STACK_SIZE
+	int "Lighting refresh thread stack size (bytes)"
+	default 1536
+	range 512 8192
+	help
+	  Statically allocated supervisor stack for rendering, the synchronous
+	  strip driver, and rate-limited error logging. Adjust for the driver used.
+
+endif # LIGHTING_AUTO_REFRESH
+
+endmenu

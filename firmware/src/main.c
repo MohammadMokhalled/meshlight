@@ -69,9 +69,6 @@ int main(void)
 	if (err == 0) {
 		err = lighting_set_on(true);
 	}
-	if (err == 0) {
-		err = lighting_apply();
-	}
 	if (err != 0) {
 		LOG_ERR("Lighting demo startup failed (%d)", err);
 		return err;
@@ -98,14 +95,11 @@ int main(void)
 		}
 		state.intensity = (uint8_t)next_intensity;
 
-		/* Stage every pixel, then send exactly one complete frame. */
+		/* The independent lighting worker displays this request on its next frame. */
 		err = lighting_set_all(&state);
-		if (err == 0) {
-			err = lighting_apply();
-		}
 		if (err != 0) {
 			LOG_ERR("Lighting demo update failed (%d)", err);
-			/* Limit retries and logging if the strip transport fails. */
+			/* Limit retries if a state request fails; output errors are logged by lighting. */
 			k_sleep(K_SECONDS(1));
 		}
 	}

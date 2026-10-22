@@ -2,9 +2,9 @@
  * @file
  * @brief Private per-LED selections and one gamma-corrected strip output path.
  *
- * Setters change requested values; only initialization and explicit apply
- * transmit. A separate framebuffer protects requested values from drivers
- * that overwrite their input, and allows failed transfers to be retried.
+ * Setters change requested values. A private periodic thread applies them;
+ * callers may also request a synchronous flush. A separate framebuffer
+ * protects requested values from drivers that overwrite their input.
  */
 
 /*
@@ -21,6 +21,7 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 /*
@@ -33,9 +34,18 @@
 #define STRIP_NODE DT_ALIAS(led_strip)
 #define STRIP_LENGTH DT_PROP(STRIP_NODE, chain_length)
 
+/* Lower urgency than application control threads; rendering can block on SPI. */
+#define REFRESH_THREAD_PRIORITY 7
+#define REFRESH_ERROR_LOG_INTERVAL_MS 1000U
+
 BUILD_ASSERT(DT_NODE_HAS_STATUS(STRIP_NODE, okay), "An enabled led-strip alias is required");
 BUILD_ASSERT(STRIP_LENGTH > 0, "The LED strip must contain at least one pixel");
 BUILD_ASSERT(ARRAY_SIZE(gamma_table) == 256U, "Gamma table must cover every 8-bit value");
+
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+BUILD_ASSERT(REFRESH_THREAD_PRIORITY < CONFIG_NUM_PREEMPT_PRIORITIES,
+	     "Lighting refresh requires preemptible priority 7");
+#endif
 
 /* Immutable reference to the strip selected by this board's devicetree. */
 static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
@@ -55,6 +65,15 @@ static bool initialized;
 /* Hold through each complete transfer so setters cannot change a live frame. */
 K_MUTEX_DEFINE(lighting_mutex);
 
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+LOG_MODULE_REGISTER(lighting);
+
+/* Created once, only after the strip's initial clear succeeds; no heap or timer. */
+static K_KERNEL_STACK_DEFINE(refresh_stack, CONFIG_LIGHTING_REFRESH_STACK_SIZE);
+static struct k_thread refresh_thread;
+static int64_t first_refresh_ms;
+#endif
+
 /*
  * ============================================================================
  * PRIVATE FUNCTION DECLARATIONS
@@ -65,6 +84,9 @@ static int lock_lighting(void);
 static int lock_initialized(void);
 static uint8_t render_channel(uint8_t channel, uint8_t intensity);
 static int render_frame(void);
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+static void refresh_entry(void *unused_a, void *unused_b, void *unused_c);
+#endif
 
 /*
  * ============================================================================
@@ -96,6 +118,15 @@ int lighting_init(void)
 			};
 		}
 		initialized = true;
+
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+		/* Anchor timing before starting; the worker waits one full interval. */
+		first_refresh_ms = k_uptime_get() + CONFIG_LIGHTING_REFRESH_INTERVAL_MS;
+		k_thread_create(&refresh_thread, refresh_stack,
+				K_KERNEL_STACK_SIZEOF(refresh_stack), refresh_entry,
+				NULL, NULL, NULL, K_PRIO_PREEMPT(REFRESH_THREAD_PRIORITY),
+				0, K_NO_WAIT);
+#endif
 	}
 
 out:
@@ -278,3 +309,42 @@ static int render_frame(void)
 
 	return led_strip_update_rgb(strip, framebuffer, ARRAY_SIZE(framebuffer));
 }
+
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+/**
+ * Refresh from thread context on an absolute uptime schedule.
+ * Adding an interval to the previous deadline avoids accumulating SPI and
+ * logging execution time. Skip elapsed slots after delays: only the latest
+ * selection matters, so missed frames must never create a catch-up loop.
+ */
+static void refresh_entry(void *unused_a, void *unused_b, void *unused_c)
+{
+	const int64_t period_ms = CONFIG_LIGHTING_REFRESH_INTERVAL_MS;
+	int64_t deadline_ms = first_refresh_ms;
+
+	ARG_UNUSED(unused_a);
+	ARG_UNUSED(unused_b);
+	ARG_UNUSED(unused_c);
+
+	while (true) {
+		int64_t now_ms;
+		int err;
+
+		/* Recheck the deadline even if a kernel wakeup interrupts the sleep. */
+		while (k_uptime_get() < deadline_ms) {
+			k_sleep(K_TIMEOUT_ABS_MS(deadline_ms));
+		}
+		err = lighting_apply();
+		if (err != 0) {
+			LOG_ERR_RATELIMIT_RATE(REFRESH_ERROR_LOG_INTERVAL_MS,
+					      "LED strip refresh failed (%d)", err);
+		}
+
+		deadline_ms += period_ms;
+		now_ms = k_uptime_get();
+		if (deadline_ms <= now_ms) {
+			deadline_ms += ((now_ms - deadline_ms) / period_ms + 1) * period_ms;
+		}
+	}
+}
+#endif
