@@ -124,12 +124,16 @@ static DEVICE_API(led_strip, fake_api) = {
 DEVICE_DT_DEFINE(STRIP_NODE, NULL, NULL, NULL, NULL, POST_KERNEL,
 		 CONFIG_LED_STRIP_INIT_PRIORITY, &fake_api);
 
-/** Replace injection controls without racing a worker or manual caller. */
-static void configure_fake(const struct fake_settings *settings)
+/** Replace controls and return the last transfer started with earlier settings. */
+static uint32_t configure_fake(const struct fake_settings *settings)
 {
+	uint32_t after;
+
 	k_mutex_lock(&fake_mutex, K_FOREVER);
 	fake.settings = *settings;
+	after = fake.started;
 	k_mutex_unlock(&fake_mutex);
+	return after;
 }
 
 /** Return a synchronized completion sequence, not a racy global counter. */
@@ -203,8 +207,8 @@ static void *refresh_setup(void)
 	const struct device *dev = DEVICE_DT_GET(STRIP_NODE);
 	struct fake_settings settings = {.error = -EIO, .overwrite = true};
 	struct lighting_led_state state;
+	struct frame_record clear;
 	struct frame_record record;
-	int64_t initialized_ms;
 	bool on = true;
 
 	zassert_equal(lighting_apply(), -ENODEV);
@@ -224,9 +228,13 @@ static void *refresh_setup(void)
 	settings.error = 0;
 	configure_fake(&settings);
 	zassert_ok(lighting_init());
-	initialized_ms = k_uptime_get();
-	zassert_equal(completed_count(), 2);
-	record = wait_frame(1);
+	/* Read startup history after the first automatic frame has completed. */
+	record = wait_frame(2);
+	clear = wait_frame(1);
+	zassert_equal(clear.caller, k_current_get());
+	assert_uniform(&clear, 0, 0, 0);
+	zassert_true(record.start_ms >= clear.finish_ms + PERIOD_MS - 2);
+	zassert_not_equal(record.caller, k_current_get());
 	assert_uniform(&record, 0, 0, 0);
 	zassert_ok(lighting_get_on(&on));
 	zassert_false(on);
@@ -236,13 +244,6 @@ static void *refresh_setup(void)
 		zassert_equal(state.intensity, 100);
 	}
 
-	/* Initial clear is synchronous; the worker must wait its first interval. */
-	k_msleep(PERIOD_MS / 2);
-	zassert_equal(completed_count(), 2);
-	record = wait_frame(2);
-	zassert_true(record.start_ms >= initialized_ms + PERIOD_MS - 2);
-	zassert_not_equal(record.caller, k_current_get());
-	assert_uniform(&record, 0, 0, 0);
 	refresh_tid = record.caller;
 	return NULL;
 }
@@ -339,9 +340,11 @@ ZTEST(refresh, test_absolute_cadence_under_transfer_delay)
 	struct frame_record first;
 	struct frame_record last;
 	int64_t elapsed_ms;
+	uint32_t after;
 
-	configure_fake(&settings);
-	first = next_frame();
+	after = configure_fake(&settings);
+	first = wait_frame(after);
+	zassert_equal(first.delay_ms, settings.delay_ms);
 	last = first;
 	for (unsigned int i = 0; i < 8U; i++) {
 		last = wait_frame(last.number);
@@ -360,11 +363,13 @@ ZTEST(refresh, test_overrun_skips_missed_slots)
 	struct frame_record slow;
 	struct frame_record next;
 	int64_t elapsed_ms;
+	uint32_t after;
 
-	configure_fake(&settings);
-	slow = next_frame();
+	after = configure_fake(&settings);
+	/* Observe the one-shot transfer only after its successor has completed. */
+	next = wait_frame(after + 1U);
+	slow = wait_frame(after);
 	zassert_equal(slow.delay_ms, settings.once_delay_ms);
-	next = wait_frame(slow.number);
 	elapsed_ms = next.start_ms - slow.start_ms;
 	zassert_true(elapsed_ms >= 3 * PERIOD_MS - TIMING_TOLERANCE_MS);
 	zassert_true(elapsed_ms <= 3 * PERIOD_MS + TIMING_TOLERANCE_MS);
@@ -382,6 +387,7 @@ ZTEST(refresh, test_failure_retry_and_framebuffer_recovery)
 	};
 	struct lighting_led_state actual;
 	struct frame_record record;
+	uint32_t after;
 
 	configure_fake(&settings);
 	zassert_ok(lighting_set_all(&request));
@@ -396,8 +402,8 @@ ZTEST(refresh, test_failure_retry_and_framebuffer_recovery)
 	assert_rgb(&actual.rgb, 255, 128, 64);
 	zassert_equal(actual.intensity, 50);
 	settings.error = 0;
-	configure_fake(&settings);
-	record = next_frame();
+	after = configure_fake(&settings);
+	record = wait_frame(after);
 	zassert_ok(record.error);
 	assert_uniform(&record, 56, 12, 3);
 	record = wait_frame(record.number);
@@ -467,7 +473,10 @@ ZTEST(refresh, test_manual_apply_and_concurrent_setters)
 	struct producer_request a = {.state = {.rgb = {.r = 255}, .intensity = 100}};
 	struct producer_request b = {.state = {.rgb = {.b = 255}, .intensity = 100}};
 	struct frame_record record;
+	unsigned int a_frames = 0;
+	unsigned int b_frames = 0;
 	uint32_t before;
+	uint32_t after;
 
 	configure_fake(&settings);
 	zassert_ok(lighting_set_on(true));
@@ -480,7 +489,17 @@ ZTEST(refresh, test_manual_apply_and_concurrent_setters)
 	zassert_ok(k_thread_join(&producer_b, K_SECONDS(5)));
 	zassert_ok(a.result);
 	zassert_ok(b.result);
-	zassert_true(completed_count() >= before + 16U);
+	after = completed_count();
+	for (uint32_t number = before; number < after; number++) {
+		record = wait_frame(number);
+		if (record.caller == &producer_a) {
+			a_frames++;
+		} else if (record.caller == &producer_b) {
+			b_frames++;
+		}
+	}
+	zassert_equal(a_frames, 8U, "Producer A transmitted %u of 8 frames", a_frames);
+	zassert_equal(b_frames, 8U, "Producer B transmitted %u of 8 frames", b_frames);
 	record = next_frame();
 	zassert_equal(record.caller, refresh_tid);
 	assert_serialized();
