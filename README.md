@@ -5,7 +5,8 @@ STM32 boards. A shared C module provides per-LED color and intensity, gamma
 correction, and automatic refresh, with hardware configuration kept in devicetree
 overlays.
 
-**Current scope:** a standalone lighting controller and demonstration application.
+**Current scope:** a standalone lighting controller with persistent settings and
+an optional developer UART shell.
 Bluetooth Mesh messaging and Android control are planned; neither is implemented.
 
 ## What it does
@@ -14,13 +15,18 @@ Bluetooth Mesh messaging and Android control are planned; neither is implemented
 - Applies gamma 2.2 through an integer lookup pipeline, without runtime floating point.
 - Refreshes output in a dedicated Zephyr thread every 50 ms by default (20 Hz).
 - Preserves selected colors and intensities while the strip is off.
+- Restores lighting from CRC-protected Settings and saves actual changes in the background.
+- Provides an optional developer UART shell for manual control.
 - Serializes state updates and transfers with a mutex, using static storage.
 - Builds the same application for two boards with nRF Connect SDK **3.3.0**.
 
-On boot, the application clears the strip, selects red at 10% intensity, and
-enables output. All LEDs then pulse between 10% and 100% intensity, advancing
-through red, yellow, green, cyan, blue, and magenta at each dim endpoint.
-The demo updates requests every 50 ms; output refresh runs independently.
+On boot, the application restores the last saved colors and intensities and
+always selects power on. With no valid snapshot it starts white at 50% intensity
+and waits for control input. Color/intensity changes save automatically after
+one second without further edits; continuous edits postpone saving until they stop.
+Power changes are runtime-only.
+See [persistent settings and developer shell](docs/storage.md) for flash layout,
+API contracts, shell commands, and manual retention checks.
 
 ## Supported hardware
 
@@ -61,6 +67,29 @@ Use separate build directories for each board. Change `chain-length` in its
 
 ## How it is organized
 
+Firmware sources are grouped by module:
+
+```text
+firmware/src/
+  main.c
+  lighting/
+    CMakeLists.txt
+    lighting.h             Public lighting API
+    lighting.c             State, rendering, refresh, and persistence scheduling
+    lighting_settings.c/.h Private CBOR encoding
+    lighting_shell.c       Optional developer commands
+    lighting_gamma_table.h Private lookup table
+  storage/
+    CMakeLists.txt
+    storage.h              Public storage API
+    storage.c              Zephyr Settings backend access
+```
+
+Each module owns its source list. Include public interfaces as
+`"lighting/lighting.h"` and `"storage/storage.h"` using the shared `src` include
+root; implementation headers stay beside their module. Production builds and
+tests reuse the same module CMake files.
+
 ```mermaid
 flowchart TD
     app["main.c / control source"] -->|setters| state["Requested RGB, intensity, on/off"]
@@ -78,9 +107,10 @@ threading contract, and refresh options.
 
 | Location | Responsibility |
 | --- | --- |
-| [firmware/src/main.c](firmware/src/main.c) | Startup, version logging, and the demonstration loop |
-| [firmware/src/lighting.h](firmware/src/lighting.h) | Public lighting interface and API contracts |
-| [firmware/src/lighting.c](firmware/src/lighting.c) | Requested state, rendering, locking, and refresh scheduling |
+| [firmware/src/main.c](firmware/src/main.c) | Startup, version logging, and restored lighting |
+| [firmware/src/lighting/lighting.h](firmware/src/lighting/lighting.h) | Public lighting interface and API contracts |
+| [firmware/src/lighting/lighting.c](firmware/src/lighting/lighting.c) | Requested state, rendering, locking, and refresh scheduling |
+| [firmware/src/storage/](firmware/src/storage/) | Shared Settings storage interface and implementation |
 | [firmware/boards/](firmware/boards/) | Pins, SPI encoding, LED count, and color order |
 | [firmware/tests/](firmware/tests/) | Production-module tests with fake strip devices |
 | [scripts/](scripts/) and [.github/](.github/) | Version resolution, CI validation, packaging, and releases |
@@ -88,10 +118,11 @@ threading contract, and refresh options.
 
 ## Testing and releases
 
-The firmware test inventory contains **76 cases across five scenarios**:
-20 manual-mode cases for each of 1, 6, and 17 LEDs, plus eight automatic-refresh
-cases at each of 50 ms and 20 ms. CI builds both products and runs these scenarios
-in QEMU. Python tests also cover versioning, packaging, report validation, and
+The firmware test inventory contains **291 cases across seventeen scenarios**:
+23 manual-mode cases for each of 1, 6, and 17 LEDs, plus eight automatic-refresh
+cases at each of 50 ms and 20 ms, 190 persistence/shell cases across ten boot
+conditions, and 16 storage integration cases across ZMS and NVS. CI builds both
+products with and without the shell and runs these scenarios in QEMU. Python tests also cover versioning, packaging, report validation, and
 release publication using a mocked GitHub interface.
 
 See [testing](docs/testing.md) for commands and coverage, and the
@@ -103,9 +134,8 @@ validation. See [versioning and CI](docs/ci.md) for downloads and release steps.
 
 ## Project status
 
-Persistence, network transport, provisioning, and interactive controls are future
-work. The current demo continuously writes lighting state; replace its loop when
-integrating another control source. Gamma 2.2 is fixed, and small nonzero values
+Network transport, provisioning, Android control, and secure secret storage are
+future work. The developer shell provides current interactive control. Gamma 2.2 is fixed, and small nonzero values
 can round to black with eight-bit output.
 
 ## License

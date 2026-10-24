@@ -10,6 +10,9 @@
  * is required when automatic refresh is disabled. Getters return requested
  * values, not hardware readback. Each call is serialized, but separate setters
  * are not an atomic batch: a refresh may display intermediate selections.
+ * Actual RGB/intensity changes save automatically after 1 s without changes;
+ * setter success confirms RAM acceptance only. Storage failures retry in the
+ * background. Power is runtime-only and is never saved.
  * Except for lighting_get_led_count(), all calls require thread context.
  */
 
@@ -44,12 +47,14 @@ struct lighting_led_state {
  */
 
 /**
- * @brief Initialize the strip and transmit black to every configured LED.
+ * @brief Restore settings and transmit the first frame before starting workers.
  *
- * Initial requested values are black RGB, 100% intensity, and power off.
+ * Restores requested RGB/intensity and always selects power on initially.
+ * Missing/invalid settings select white RGB and 50% intensity.
+ * Storage failures are logged and do not prevent usable lighting.
  * Successful repeated calls preserve all requested values and do not transmit.
  * Initialization failures can be retried; other controls remain unavailable
- * until clearing the strip succeeds.
+ * until the first restored/default frame succeeds.
  *
  * With automatic refresh enabled, starts one private preemptible thread after
  * successful initialization. Its first deadline is one configured interval
@@ -58,7 +63,7 @@ struct lighting_led_state {
  * @retval 0 Successfully initialized, or already initialized.
  * @retval -ENODEV The configured strip device is not ready.
  * @retval -EWOULDBLOCK Called from interrupt context.
- * @return A negative driver error if clearing the strip fails.
+ * @return A negative driver error if transmitting the first frame fails.
  */
 int lighting_init(void);
 
@@ -106,6 +111,52 @@ int lighting_set_led(size_t index, const struct lighting_led_state *state);
  * @retval -EWOULDBLOCK Called from interrupt context.
  */
 int lighting_set_all(const struct lighting_led_state *state);
+
+/**
+ * @brief Stage one LED's RGB, preserving its intensity and strip-wide power.
+ *
+ * The update and preservation happen under one lock, including with concurrent
+ * setters. Copies caller-owned RGB; does not transmit. Actual changes schedule
+ * persistence, just like lighting_set_led().
+ *
+ * @retval 0 Requested color stored.
+ * @retval -EINVAL The RGB pointer is NULL.
+ * @retval -ERANGE The index is out of range.
+ * @retval -ENODEV Initialization has not succeeded.
+ * @retval -EWOULDBLOCK Called from interrupt context.
+ */
+int lighting_set_led_color(size_t index, const struct led_rgb *rgb);
+
+/**
+ * @brief Stage RGB for every LED, preserving each LED's own intensity and power.
+ *
+ * Copies caller-owned RGB under one lock for the whole strip. Does not transmit;
+ * actual changes schedule persistence. Error contracts match
+ * lighting_set_led_color(), without an index argument.
+ */
+int lighting_set_all_color(const struct led_rgb *rgb);
+
+/**
+ * @brief Stage one LED's intensity, preserving its RGB and strip-wide power.
+ *
+ * The update and preservation happen under one lock. Does not transmit;
+ * actual changes schedule persistence.
+ *
+ * @retval 0 Requested intensity stored.
+ * @retval -ERANGE The index is out of range or intensity exceeds 100%.
+ * @retval -ENODEV Initialization has not succeeded.
+ * @retval -EWOULDBLOCK Called from interrupt context.
+ */
+int lighting_set_led_intensity(size_t index, uint8_t intensity);
+
+/**
+ * @brief Stage intensity for every LED, preserving each LED's own RGB and power.
+ *
+ * One lock covers the whole strip. Does not transmit; actual changes schedule
+ * persistence. Error contracts match lighting_set_led_intensity(), without an
+ * index argument.
+ */
+int lighting_set_all_intensity(uint8_t intensity);
 
 /**
  * @brief Copy one LED's requested RGB and intensity into caller-owned storage.

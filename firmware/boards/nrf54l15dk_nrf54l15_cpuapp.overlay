@@ -2,9 +2,25 @@
 #include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
 
 / {
+	chosen {
+		zephyr,code-partition = &app_partition;
+	};
 	aliases {
 		/* The lighting module depends only on this board-independent alias. */
 		led-strip = &lighting_strip;
+	};
+};
+
+/* Standalone image boots at zero; retain the SDK's final 36 KiB for Settings. */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+&cpuapp_rram {
+	partitions {
+		app_partition: partition@0 {
+			label = "image-0";
+			reg = <0 0x15c000>;
+		};
 	};
 };
 

@@ -2,9 +2,30 @@
 #include <zephyr/dt-bindings/led/led.h>
 
 / {
+	chosen {
+		zephyr,code-partition = &app_partition;
+	};
 	aliases {
 		/* Reuse the same lighting module and six-pixel demo on this board. */
 		led-strip = &lighting_strip;
+	};
+};
+
+/* The SoC exposes 808 KiB to this image. Reserve the last two 4 KiB pages. */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+&flash0 {
+	partitions {
+		app_partition: partition@0 {
+			label = "image-0";
+			reg = <0 0xc8000>;
+		};
+		storage_partition: partition@c8000 {
+			label = "storage";
+			reg = <0xc8000 0x2000>;
+		};
 	};
 };
 

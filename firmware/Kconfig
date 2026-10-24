@@ -7,6 +7,21 @@ source "Kconfig.zephyr"
 
 menu "Lighting"
 
+config LIGHTING_SAVE_DELAY_MS
+	int "Quiet period before saving lighting (milliseconds)"
+	default 1000
+	range 1 60000
+
+config LIGHTING_SAVE_RETRY_MS
+	int "Delay before retrying a failed lighting save (milliseconds)"
+	default 5000
+	range 1 60000
+
+config LIGHTING_PERSISTENCE_STACK_SIZE
+	int "Lighting persistence worker stack size (bytes)"
+	default 3072
+	range 1024 8192
+
 config LIGHTING_AUTO_REFRESH
 	bool "Automatically refresh the LED strip"
 	default y
@@ -40,3 +55,14 @@ config LIGHTING_REFRESH_STACK_SIZE
 endif # LIGHTING_AUTO_REFRESH
 
 endmenu
+
+config MESHLIGHT_DEV_SHELL
+	bool "Developer UART shell"
+	default n
+	select SHELL
+	select SHELL_BACKEND_SERIAL if !ZTEST
+	help
+	  Enable lighting commands over the board's existing debugger UART.
+	  Disabled builds contain no developer shell commands or transport.
+	  Use dev_shell.conf to enable this option in a developer build.
+	  Commands use the lighting API and its normal background save policy.

@@ -6,16 +6,15 @@ The lighting module controls one strip through Zephyr's `led-strip` devicetree
 alias. It keeps requested state separate from the transfer framebuffer, so RGB
 and intensity remain available after power changes or driver failures. The
 public interface and return values are documented in
-[lighting.h](../firmware/src/lighting.h).
+[lighting.h](../firmware/src/lighting/lighting.h).
 
 ## Usage example
 
-Replace the demonstration loop in [main.c](../firmware/src/main.c) when adding
-another control source; otherwise it will keep overwriting your requests.
+The application restores state at startup and waits for control input.
 Call the module from a Zephyr thread and check return values:
 
 ```c
-#include "lighting.h"
+#include "lighting/lighting.h"
 
 /* Blue at 50% intensity everywhere, with the first LED red at 50%. */
 int show_example(void)
@@ -57,12 +56,14 @@ strip-wide on/off setting controls whether those values are rendered.
 
 | Call | Behavior |
 | --- | --- |
-| `lighting_init()` | Transmits black; initializes black RGB, 100% intensity, and power off; starts the worker if enabled |
+| `lighting_init()` | Restores RGB/intensity or selects white/50%; always starts with power on; displays the first frame, then starts workers |
 | `lighting_get_led_count()` | Returns the immutable devicetree count, including before initialization |
 | `lighting_set_led(index, &state)` | Copies RGB and intensity for one LED |
 | `lighting_set_all(&state)` | Copies the same RGB and intensity to every LED under one lock |
+| `lighting_set_led_color(index, &rgb)` / `lighting_set_all_color(&rgb)` | Changes RGB while preserving each targeted LED's intensity |
+| `lighting_set_led_intensity(index, intensity)` / `lighting_set_all_intensity(intensity)` | Changes intensity while preserving each targeted LED's RGB |
 | `lighting_get_led(index, &state)` | Copies one LED's raw requested values into caller-owned storage |
-| `lighting_set_on(on)` / `lighting_get_on(&on)` | Stores or reads the strip-wide on/off selection |
+| `lighting_set_on(on)` / `lighting_get_on(&on)` | Changes or reads the runtime strip-wide on/off selection |
 | `lighting_apply()` | Renders and synchronously transmits the complete current selection |
 
 After successful initialization, repeated `lighting_init()` calls preserve
@@ -96,7 +97,7 @@ For example, channel 128 at 100% intensity produces output 56. Channel 255 at
 255 are gamma-corrected even at full intensity. Very small nonzero selections
 can round to black; there is no minimum-output clamp or dithering.
 
-The private [lookup table](../firmware/src/lighting_gamma_table.h) documents its
+The private [lookup table](../firmware/src/lighting/lighting_gamma_table.h) documents its
 generating formula. Firmware uses integer arithmetic and 256 bytes of lookup
 data, with no runtime floating-point calculation. Gamma 2.2 is a fixed curve;
 strip-specific color calibration is not implemented.
@@ -110,8 +111,17 @@ from any context, including before initialization.
 
 Each call is serialized. Separate setter calls are not an atomic batch: a
 refresh can display intermediate selections between calls, even from one caller.
-`lighting_set_all()` changes every LED under one lock, so a refresh cannot see
-only part of that uniform update.
+Every all-LED setter changes the whole strip under one lock, so a refresh
+cannot see a partially updated strip. Color-only and intensity-only setters
+preserve the other field under that same lock, avoiding lost updates from
+concurrent callers. All RGB/intensity setters preserve the power selection
+and automatically schedule persistence only when requested RGB/intensity values
+actually change. Power changes never request or postpone saving.
+
+Saving uses a one-second debounce on a private work queue. Continuous edits
+postpone it until they stop. Setter success confirms RAM acceptance; pending
+changes can be lost on power failure. There are no public lighting save/restore
+triggers. Startup restores before the first frame and always selects power on.
 
 | Error | Meaning |
 | --- | --- |
@@ -119,7 +129,7 @@ only part of that uniform update.
 | `-ERANGE` | An LED index is outside the strip or intensity exceeds 100% |
 | `-ENODEV` | Initialization has not succeeded, or the device is not ready during initialization |
 | `-EWOULDBLOCK` | An otherwise valid control call was made from interrupt context |
-| Negative driver error | The initial clear or a synchronous `lighting_apply()` transfer failed |
+| Negative driver error | The first frame or a synchronous `lighting_apply()` transfer failed |
 
 Invalid requests leave stored state unchanged; failed getters leave the caller's
 output unchanged. For per-function error contracts, see the public header.
@@ -152,7 +162,7 @@ CONFIG_LIGHTING_REFRESH_STACK_SIZE=1536
 | `CONFIG_LIGHTING_REFRESH_STACK_SIZE` | `1536` | 512–8192 bytes; available with automatic refresh |
 
 The worker uses preemptible priority **7** and starts once after successful
-initialization. Its first deadline is one interval after the initial clear.
+initialization. Its first deadline is one interval after the first frame.
 Absolute deadlines prevent transfer time from accumulating into the period.
 If a transfer or scheduler delay overruns a slot, missed slots are skipped and
 the next transfer uses current requests. No old-frame backlog is queued.
@@ -165,4 +175,7 @@ per second. Manual `lighting_apply()` calls use the same serialized output path,
 return driver errors directly, and do not restart the background schedule.
 
 With automatic refresh disabled, applications must call `lighting_apply()` to
-display changes. The included demo relies on automatic refresh.
+display changes. The default application relies on automatic refresh.
+
+See [persistent settings and developer shell](storage.md) for the save policy,
+CBOR compatibility, save retries, and UART commands.

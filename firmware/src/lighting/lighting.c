@@ -17,8 +17,11 @@
 
 #include "lighting.h"
 #include "lighting_gamma_table.h"
+#include "lighting_settings.h"
+#include "storage/storage.h"
 
 #include <errno.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -67,10 +70,26 @@ static bool initialized;
 /* Hold through each complete transfer so setters cannot change a live frame. */
 K_MUTEX_DEFINE(lighting_mutex);
 
-#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
 LOG_MODULE_REGISTER(lighting);
 
-/* Created once, only after the strip's initial clear succeeds; no heap or timer. */
+/* Serialize init/retry; only the worker uses staging buffers after startup. */
+K_MUTEX_DEFINE(init_mutex);
+static struct lighting_led_state staged_states[STRIP_LENGTH];
+static uint8_t settings_buffer[LIGHTING_SETTINGS_MAX_SIZE];
+static bool save_pending;
+static int64_t save_due_ms;
+static struct k_work_q persistence_queue;
+static struct k_work_delayable save_work;
+static K_KERNEL_STACK_DEFINE(persistence_stack, CONFIG_LIGHTING_PERSISTENCE_STACK_SIZE);
+
+/* Worst case: four two-byte unsigned values and an array header per pixel. */
+BUILD_ASSERT(9U * STRIP_LENGTH + 16U <= LIGHTING_SETTINGS_MAX_SIZE,
+	     "Lighting snapshot exceeds the single-record storage limit");
+BUILD_ASSERT(8 < CONFIG_NUM_PREEMPT_PRIORITIES, "Persistence requires priority 8");
+
+#if defined(CONFIG_LIGHTING_AUTO_REFRESH)
+
+/* Created once after the restored/default first frame succeeds; no heap or timer. */
 static K_KERNEL_STACK_DEFINE(refresh_stack, CONFIG_LIGHTING_REFRESH_STACK_SIZE);
 static struct k_thread refresh_thread;
 static int64_t first_refresh_ms;
@@ -84,8 +103,13 @@ static int64_t first_refresh_ms;
 
 static int lock_lighting(void);
 static int lock_initialized(void);
+static int set_selection(size_t first, size_t count, const struct led_rgb *rgb,
+			 const uint8_t *intensity);
 static uint8_t render_channel(uint8_t channel, uint8_t intensity);
 static int render_frame(void);
+static void save_entry(struct k_work *work);
+static void request_save_locked(void);
+static int restore_settings(void);
 #if defined(CONFIG_LIGHTING_AUTO_REFRESH)
 static void refresh_entry(void *unused_a, void *unused_b, void *unused_c);
 #endif
@@ -98,31 +122,46 @@ static void refresh_entry(void *unused_a, void *unused_b, void *unused_c);
 
 int lighting_init(void)
 {
-	int err = lock_lighting();
+	int err;
+	int restore_err;
 
-	if (err != 0) {
-		return err;
+	if (k_is_in_isr()) {
+		return -EWOULDBLOCK;
 	}
+	k_mutex_lock(&init_mutex, K_FOREVER);
+	k_mutex_lock(&lighting_mutex, K_FOREVER);
 	if (initialized) {
-		goto out;
+		k_mutex_unlock(&lighting_mutex);
+		k_mutex_unlock(&init_mutex);
+		return 0;
 	}
+	k_mutex_unlock(&lighting_mutex);
 	if (!device_is_ready(strip)) {
-		err = -ENODEV;
-		goto out;
+		k_mutex_unlock(&init_mutex);
+		return -ENODEV;
 	}
 
-	/* Before first success, setters are unavailable and strip_on is false. */
+	/* No flash I/O holds lighting_mutex, including during initialization. */
+	restore_err = restore_settings();
+	if (restore_err != 0) {
+		for (size_t i = 0; i < STRIP_LENGTH; i++) {
+			staged_states[i] = LIGHTING_DEFAULT_STATE;
+		}
+		if (restore_err != -ENOENT) {
+			LOG_WRN("Lighting restore failed (%d); using white at 50%%", restore_err);
+		}
+	}
+	k_mutex_lock(&lighting_mutex, K_FOREVER);
+	memcpy(led_states, staged_states, sizeof(led_states));
+	strip_on = true;
 	err = render_frame();
 	if (err == 0) {
-		for (size_t i = 0; i < ARRAY_SIZE(led_states); i++) {
-			led_states[i] = (struct lighting_led_state){
-				.intensity = LIGHTING_INTENSITY_MAX,
-			};
-		}
+		k_work_init_delayable(&save_work, save_entry);
+		k_work_queue_start(&persistence_queue, persistence_stack,
+				   K_KERNEL_STACK_SIZEOF(persistence_stack),
+				   K_PRIO_PREEMPT(8), NULL);
 		initialized = true;
-
 #if defined(CONFIG_LIGHTING_AUTO_REFRESH)
-		/* Anchor timing before starting; the worker waits one full interval. */
 		first_refresh_ms = k_uptime_get() + CONFIG_LIGHTING_REFRESH_INTERVAL_MS;
 		k_thread_create(&refresh_thread, refresh_stack,
 				K_KERNEL_STACK_SIZEOF(refresh_stack), refresh_entry,
@@ -130,9 +169,8 @@ int lighting_init(void)
 				0, K_NO_WAIT);
 #endif
 	}
-
-out:
 	k_mutex_unlock(&lighting_mutex);
+	k_mutex_unlock(&init_mutex);
 	return err;
 }
 
@@ -143,45 +181,59 @@ size_t lighting_get_led_count(void)
 
 int lighting_set_led(size_t index, const struct lighting_led_state *state)
 {
-	int err;
-
 	if (state == NULL) {
 		return -EINVAL;
 	}
 	if (index >= STRIP_LENGTH || state->intensity > LIGHTING_INTENSITY_MAX) {
 		return -ERANGE;
 	}
-	err = lock_initialized();
-	if (err != 0) {
-		return err;
-	}
-
-	led_states[index] = *state;
-	k_mutex_unlock(&lighting_mutex);
-	return 0;
+	return set_selection(index, 1, &state->rgb, &state->intensity);
 }
 
 int lighting_set_all(const struct lighting_led_state *state)
 {
-	int err;
-
 	if (state == NULL) {
 		return -EINVAL;
 	}
 	if (state->intensity > LIGHTING_INTENSITY_MAX) {
 		return -ERANGE;
 	}
-	err = lock_initialized();
-	if (err != 0) {
-		return err;
-	}
+	return set_selection(0, STRIP_LENGTH, &state->rgb, &state->intensity);
+}
 
-	/* One lock makes the entire all-LED selection indivisible to apply. */
-	for (size_t i = 0; i < ARRAY_SIZE(led_states); i++) {
-		led_states[i] = *state;
+int lighting_set_led_color(size_t index, const struct led_rgb *rgb)
+{
+	if (rgb == NULL) {
+		return -EINVAL;
 	}
-	k_mutex_unlock(&lighting_mutex);
-	return 0;
+	if (index >= STRIP_LENGTH) {
+		return -ERANGE;
+	}
+	return set_selection(index, 1, rgb, NULL);
+}
+
+int lighting_set_all_color(const struct led_rgb *rgb)
+{
+	if (rgb == NULL) {
+		return -EINVAL;
+	}
+	return set_selection(0, STRIP_LENGTH, rgb, NULL);
+}
+
+int lighting_set_led_intensity(size_t index, uint8_t intensity)
+{
+	if (index >= STRIP_LENGTH || intensity > LIGHTING_INTENSITY_MAX) {
+		return -ERANGE;
+	}
+	return set_selection(index, 1, NULL, &intensity);
+}
+
+int lighting_set_all_intensity(uint8_t intensity)
+{
+	if (intensity > LIGHTING_INTENSITY_MAX) {
+		return -ERANGE;
+	}
+	return set_selection(0, STRIP_LENGTH, NULL, &intensity);
 }
 
 int lighting_get_led(size_t index, struct lighting_led_state *state)
@@ -252,6 +304,106 @@ int lighting_apply(void)
  * PRIVATE FUNCTION DEFINITIONS
  * ============================================================================
  */
+
+/* Optional fields preserve the other selection under the same lock as updates. */
+static int set_selection(size_t first, size_t count, const struct led_rgb *rgb,
+			 const uint8_t *intensity)
+{
+	bool changed = false;
+	int err = lock_initialized();
+
+	if (err != 0) {
+		return err;
+	}
+	for (size_t i = first; i < first + count; i++) {
+		if (rgb != NULL) {
+			changed |= led_states[i].rgb.r != rgb->r ||
+				   led_states[i].rgb.g != rgb->g || led_states[i].rgb.b != rgb->b;
+			led_states[i].rgb = *rgb;
+		}
+		if (intensity != NULL) {
+			changed |= led_states[i].intensity != *intensity;
+			led_states[i].intensity = *intensity;
+		}
+	}
+	if (changed) {
+		request_save_locked();
+	}
+	k_mutex_unlock(&lighting_mutex);
+	return 0;
+}
+
+/* Startup only, before either worker can access staging buffers. */
+static int restore_settings(void)
+{
+	size_t length;
+	int err = storage_init();
+
+	if (err == 0) {
+		err = storage_restore(LIGHTING_SETTINGS_KEY, settings_buffer,
+				      sizeof(settings_buffer), &length);
+	}
+	if (err == 0) {
+		err = lighting_settings_decode(settings_buffer, length, staged_states, STRIP_LENGTH);
+	}
+	return err;
+}
+
+/* All actual RGB/intensity changes arrive here with lighting_mutex held. */
+static void request_save_locked(void)
+{
+	save_pending = true;
+	save_due_ms = k_uptime_get() + CONFIG_LIGHTING_SAVE_DELAY_MS;
+	/* The queue remains active for the lifetime of the lighting module. */
+	(void)k_work_reschedule_for_queue(&persistence_queue, &save_work,
+					K_MSEC(CONFIG_LIGHTING_SAVE_DELAY_MS));
+}
+
+static void save_entry(struct k_work *work)
+{
+	int64_t remaining_ms;
+	size_t length;
+	int err;
+
+	ARG_UNUSED(work);
+	k_mutex_lock(&lighting_mutex, K_FOREVER);
+	if (!save_pending) {
+		k_mutex_unlock(&lighting_mutex);
+		return;
+	}
+	remaining_ms = save_due_ms - k_uptime_get();
+	if (remaining_ms > 0) {
+		/* Rescheduling a timer does not remove an already queued callback. */
+		(void)k_work_reschedule_for_queue(&persistence_queue, &save_work,
+						K_MSEC(remaining_ms));
+		k_mutex_unlock(&lighting_mutex);
+		return;
+	}
+	memcpy(staged_states, led_states, sizeof(staged_states));
+	save_pending = false;
+	k_mutex_unlock(&lighting_mutex);
+
+	/* No flash I/O holds the lighting mutex; later edits queue their own save. */
+	err = lighting_settings_encode(settings_buffer, sizeof(settings_buffer), &length,
+				       staged_states, STRIP_LENGTH);
+	if (err == 0) {
+		err = storage_init();
+	}
+	if (err == 0) {
+		err = storage_store(LIGHTING_SETTINGS_KEY, settings_buffer, length);
+	}
+	if (err != 0) {
+		k_mutex_lock(&lighting_mutex, K_FOREVER);
+		save_pending = true;
+		save_due_ms = k_uptime_get() + CONFIG_LIGHTING_SAVE_RETRY_MS;
+		(void)k_work_reschedule_for_queue(&persistence_queue, &save_work,
+						K_MSEC(CONFIG_LIGHTING_SAVE_RETRY_MS));
+		k_mutex_unlock(&lighting_mutex);
+		LOG_ERR_RATELIMIT_RATE(CONFIG_LIGHTING_SAVE_RETRY_MS,
+				      "Lighting save failed (%d); retrying", err);
+	}
+	/* Success must not clear a save requested while this snapshot was written. */
+}
 
 /** Reject ISR callers before taking a sleeping mutex or using the strip API. */
 static int lock_lighting(void)

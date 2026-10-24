@@ -120,6 +120,16 @@ jobs:
           west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT" meshlight/firmware -- \
             "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
             2>&1 | tee "meshlight/build/$PRODUCT.log"
+      - name: Build developer shell configuration
+        env:
+          PRODUCT: ${{ matrix.id }}
+          BOARD: ${{ matrix.board }}
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["version"])')
+          source_sha=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["source_commit"])')
+          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT-dev" meshlight/firmware -- \
+            "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
+            -DEXTRA_CONF_FILE=dev_shell.conf 2>&1 | tee "meshlight/build/$PRODUCT-dev.log"
       - name: Package firmware
         env:
           PRODUCT: ${{ matrix.id }}
@@ -145,6 +155,7 @@ jobs:
             meshlight/build/*.log
             meshlight/build/${{ matrix.id }}/CMakeFiles/CMakeConfigureLog.yaml
             meshlight/build/${{ matrix.id }}/zephyr/.config
+            meshlight/build/${{ matrix.id }}-dev/zephyr/.config
             meshlight/build/dependencies.json
           retention-days: 30
 
