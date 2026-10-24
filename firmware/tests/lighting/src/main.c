@@ -13,7 +13,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "lighting.h"
+#include "lighting/lighting.h"
 
 #define STRIP_NODE DT_ALIAS(led_strip)
 #define PIXEL_COUNT DT_PROP(STRIP_NODE, chain_length)
@@ -124,6 +124,10 @@ static void *controller_setup(void)
 	zassert_true(on);
 	zassert_equal(lighting_set_led(0, &sentinel), -ENODEV);
 	zassert_equal(lighting_set_all(&sentinel), -ENODEV);
+	zassert_equal(lighting_set_led_color(0, &sentinel.rgb), -ENODEV);
+	zassert_equal(lighting_set_all_color(&sentinel.rgb), -ENODEV);
+	zassert_equal(lighting_set_led_intensity(0, 50), -ENODEV);
+	zassert_equal(lighting_set_all_intensity(50), -ENODEV);
 	zassert_equal(lighting_set_on(true), -ENODEV);
 	zassert_equal(lighting_apply(), -ENODEV);
 	zassert_equal(fake.calls, 0);
@@ -145,13 +149,13 @@ static void *controller_setup(void)
 	fake.transfer_error = 0;
 	zassert_ok(lighting_init());
 	zassert_equal(fake.calls, 2);
-	assert_uniform(0, 0, 0);
+	assert_uniform(56, 56, 56);
 	zassert_ok(lighting_get_on(&on));
-	zassert_false(on);
+	zassert_true(on);
 	for (size_t i = 0; i < PIXEL_COUNT; i++) {
 		zassert_ok(lighting_get_led(i, &state));
-		assert_rgb(&state.rgb, 0, 0, 0);
-		zassert_equal(state.intensity, 100);
+		assert_rgb(&state.rgb, 255, 255, 255);
+		zassert_equal(state.intensity, 50);
 	}
 	return NULL;
 }
@@ -287,6 +291,64 @@ ZTEST(controller, test_all_overwrites_individual_selections)
 		zassert_ok(lighting_get_led(i, &actual));
 		assert_state(&actual, &white);
 	}
+}
+
+/** A partial update preserves the other field, other LEDs, and power. */
+ZTEST(controller, test_single_led_partial_updates_preserve_other_fields)
+{
+	struct led_rgb color = {.r = 12, .g = 34, .b = 56};
+	struct lighting_led_state actual;
+	bool on;
+
+	zassert_ok(lighting_set_led_color(PIXEL_COUNT - 1, &color));
+	memset(&color, 0, sizeof(color));
+	zassert_ok(lighting_get_led(PIXEL_COUNT - 1, &actual));
+	assert_rgb(&actual.rgb, 12, 34, 56);
+	zassert_equal(actual.intensity, 100);
+	zassert_ok(lighting_set_led_intensity(PIXEL_COUNT - 1, 0));
+	for (size_t i = 0; i < PIXEL_COUNT; i++) {
+		zassert_ok(lighting_get_led(i, &actual));
+		if (i == PIXEL_COUNT - 1) {
+			assert_rgb(&actual.rgb, 12, 34, 56);
+			zassert_equal(actual.intensity, 0);
+		} else {
+			assert_rgb(&actual.rgb, 0, 0, 0);
+			zassert_equal(actual.intensity, 100);
+		}
+	}
+	zassert_ok(lighting_get_on(&on));
+	zassert_false(on);
+	zassert_equal(fake.calls, 0);
+}
+
+/** All-target partial updates retain each LED's distinct unselected field. */
+ZTEST(controller, test_all_partial_updates_preserve_individual_selections)
+{
+	const struct led_rgb color = {.r = 255, .g = 128, .b = 64};
+	struct lighting_led_state actual;
+	bool on;
+
+	for (size_t i = 0; i < PIXEL_COUNT; i++) {
+		struct lighting_led_state request = {.rgb = {.r = i}, .intensity = i};
+
+		zassert_ok(lighting_set_led(i, &request));
+	}
+	zassert_ok(lighting_set_all_intensity(50));
+	for (size_t i = 0; i < PIXEL_COUNT; i++) {
+		zassert_ok(lighting_get_led(i, &actual));
+		assert_rgb(&actual.rgb, i, 0, 0);
+		zassert_equal(actual.intensity, 50);
+		zassert_ok(lighting_set_led_intensity(i, i));
+	}
+	zassert_ok(lighting_set_all_color(&color));
+	for (size_t i = 0; i < PIXEL_COUNT; i++) {
+		zassert_ok(lighting_get_led(i, &actual));
+		assert_rgb(&actual.rgb, 255, 128, 64);
+		zassert_equal(actual.intensity, i);
+	}
+	zassert_ok(lighting_get_on(&on));
+	zassert_false(on);
+	zassert_equal(fake.calls, 0);
 }
 
 /** Fixed reference vectors are independent of the production lookup table. */
@@ -469,6 +531,14 @@ ZTEST(controller, test_invalid_requests_are_atomic)
 	zassert_ok(lighting_set_on(true));
 	zassert_equal(lighting_set_led(0, NULL), -EINVAL);
 	zassert_equal(lighting_set_all(NULL), -EINVAL);
+	zassert_equal(lighting_set_led_color(0, NULL), -EINVAL);
+	zassert_equal(lighting_set_all_color(NULL), -EINVAL);
+	zassert_equal(lighting_set_led_color(PIXEL_COUNT, &valid.rgb), -ERANGE);
+	zassert_equal(lighting_set_led_color(SIZE_MAX, &valid.rgb), -ERANGE);
+	zassert_equal(lighting_set_led_intensity(PIXEL_COUNT, 50), -ERANGE);
+	zassert_equal(lighting_set_led_intensity(SIZE_MAX, 50), -ERANGE);
+	zassert_equal(lighting_set_led_intensity(0, 101), -ERANGE);
+	zassert_equal(lighting_set_all_intensity(UINT8_MAX), -ERANGE);
 	zassert_equal(lighting_get_led(0, NULL), -EINVAL);
 	zassert_equal(lighting_get_on(NULL), -EINVAL);
 	zassert_equal(lighting_set_led(PIXEL_COUNT, &valid), -ERANGE);
@@ -595,21 +665,25 @@ static void controls_in_isr(const void *parameter)
 	results[4] = lighting_set_on(true);
 	results[5] = lighting_get_on(&on);
 	results[6] = lighting_apply();
-	results[7] = lighting_get_led_count() == PIXEL_COUNT;
-	results[8] = state.rgb.r == 42 && state.intensity == 7 && on;
+	results[7] = lighting_set_led_color(0, &request.rgb);
+	results[8] = lighting_set_all_color(&request.rgb);
+	results[9] = lighting_set_led_intensity(0, 50);
+	results[10] = lighting_set_all_intensity(50);
+	results[11] = lighting_get_led_count() == PIXEL_COUNT;
+	results[12] = state.rgb.r == 42 && state.intensity == 7 && on;
 }
 
 /** Only the immutable count getter is allowed from interrupt context. */
 ZTEST(controller, test_isr_rejection)
 {
-	int results[9] = {0};
+	int results[13] = {0};
 
 	irq_offload(controls_in_isr, results);
-	for (size_t i = 0; i < 7U; i++) {
+	for (size_t i = 0; i < 11U; i++) {
 		zassert_equal(results[i], -EWOULDBLOCK);
 	}
-	zassert_equal(results[7], 1);
-	zassert_equal(results[8], 1);
+	zassert_equal(results[11], 1);
+	zassert_equal(results[12], 1);
 	zassert_equal(fake.calls, 0);
 }
 
@@ -618,6 +692,7 @@ struct worker_request {
 	struct lighting_led_state state;
 	size_t index;
 	bool all;
+	enum { UPDATE_BOTH, UPDATE_COLOR, UPDATE_INTENSITY } fields;
 	int result;
 };
 
@@ -634,8 +709,21 @@ static void update_worker(void *request, void *unused_a, void *unused_b)
 	ARG_UNUSED(unused_a);
 	ARG_UNUSED(unused_b);
 	for (unsigned int i = 0; i < 16U; i++) {
-		worker->result = worker->all ? lighting_set_all(&worker->state) :
-					     lighting_set_led(worker->index, &worker->state);
+		switch (worker->fields) {
+		case UPDATE_COLOR:
+			worker->result = worker->all ? lighting_set_all_color(&worker->state.rgb) :
+				lighting_set_led_color(worker->index, &worker->state.rgb);
+			break;
+		case UPDATE_INTENSITY:
+			worker->result = worker->all ?
+				lighting_set_all_intensity(worker->state.intensity) :
+				lighting_set_led_intensity(worker->index, worker->state.intensity);
+			break;
+		default:
+			worker->result = worker->all ? lighting_set_all(&worker->state) :
+				lighting_set_led(worker->index, &worker->state);
+			break;
+		}
 		if (worker->result == 0) {
 			worker->result = lighting_apply();
 		}
@@ -703,6 +791,29 @@ ZTEST(controller, test_concurrent_individual_updates)
 		assert_rgb(&fake.frame[PIXEL_COUNT - 1U], 0, 0, 255);
 		for (size_t i = 1; i + 1U < PIXEL_COUNT; i++) {
 			assert_rgb(&fake.frame[i], 0, 0, 0);
+		}
+	}
+}
+
+/** Concurrent partial setters must retain both writers, for one or all LEDs. */
+ZTEST(controller, test_concurrent_color_and_intensity_updates)
+{
+	struct worker_request a = {
+		.state = {.rgb = {.g = 255}}, .fields = UPDATE_COLOR,
+	};
+	struct worker_request b = {.state = {.intensity = 50}, .fields = UPDATE_INTENSITY};
+	struct lighting_led_state actual;
+
+	for (unsigned int all = 0; all < 2; all++) {
+		a.all = all;
+		b.all = all;
+		fake.calls = 0;
+		run_workers(&a, &b);
+		for (size_t i = 0; i < (all ? PIXEL_COUNT : 1); i++) {
+			zassert_ok(lighting_get_led(i, &actual));
+			assert_rgb(&actual.rgb, 0, 255, 0);
+			zassert_equal(actual.intensity, 50);
+			assert_rgb(&fake.frame[i], 0, 56, 0);
 		}
 	}
 }

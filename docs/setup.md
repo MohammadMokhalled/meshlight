@@ -151,9 +151,11 @@ west flash -d build/wb55
 
 Build outputs are `zephyr.hex`, `zephyr.bin`, and `zephyr.elf` under the chosen
 build directory's `zephyr/` folder. Startup logs include the resolved firmware
-version and source revision, followed by `Lighting demo started` on successful
-startup. The strip starts dim red, pulses from 10% to 100% intensity, and changes
-palette color at each dim endpoint. There is no provisioning step.
+version and source revision, followed by `Lighting ready` on successful startup.
+Saved lighting state is restored; otherwise the strip starts white at 50%
+intensity with power on. It waits for commands and does not animate. There is no
+provisioning step. Enable the [developer shell](storage.md#developer-uart-shell)
+for manual control.
 
 ## Configure the strip
 

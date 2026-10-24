@@ -12,7 +12,7 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/ztest.h>
 
-#include "lighting.h"
+#include "lighting/lighting.h"
 
 #define STRIP_NODE DT_ALIAS(led_strip)
 #define PIXEL_COUNT DT_PROP(STRIP_NODE, chain_length)
@@ -234,16 +234,16 @@ static void *refresh_setup(void)
 	record = wait_frame(2);
 	clear = wait_frame(1);
 	zassert_equal(clear.caller, k_current_get());
-	assert_uniform(&clear, 0, 0, 0);
+	assert_uniform(&clear, 56, 56, 56);
 	zassert_true(record.start_ms >= clear.finish_ms + PERIOD_MS - 2);
 	zassert_not_equal(record.caller, k_current_get());
-	assert_uniform(&record, 0, 0, 0);
+	assert_uniform(&record, 56, 56, 56);
 	zassert_ok(lighting_get_on(&on));
-	zassert_false(on);
+	zassert_true(on);
 	for (size_t i = 0; i < PIXEL_COUNT; i++) {
 		zassert_ok(lighting_get_led(i, &state));
-		assert_rgb(&state.rgb, 0, 0, 0);
-		zassert_equal(state.intensity, 100);
+		assert_rgb(&state.rgb, 255, 255, 255);
+		zassert_equal(state.intensity, 50);
 	}
 
 	refresh_tid = record.caller;

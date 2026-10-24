@@ -10,15 +10,20 @@ physical LEDs. QEMU is the firmware test platform used by CI.
 
 | Suite | Scenarios | Cases per scenario | Total |
 | --- | --- | --- | --- |
-| [lighting](../firmware/tests/lighting/) | 1, 6, and 17 LEDs; automatic refresh disabled | 20 | 60 |
+| [lighting](../firmware/tests/lighting/) | 1, 6, and 17 LEDs; automatic refresh disabled | 23 | 69 |
 | [lighting_refresh](../firmware/tests/lighting_refresh/) | 6 LEDs; automatic refresh at 50 ms and 20 ms | 8 | 16 |
-| **Firmware total** | **5 scenarios** | | **76** |
+| lighting persistence and shell | 10 boot conditions | 19 | 190 |
+| Settings storage integration | NVS and ZMS with simulated flash | 8 | 16 |
+| **Firmware total** | **17 scenarios** | | **291** |
 
 Manual-mode tests cover initialization and retry, per-LED and uniform updates,
 requested-state copies, invalid arguments, power restoration, gamma reference
 vectors, rounding, quantization, monotonicity, and interrupt-context rejection.
 Concurrency tests check that transfers do not overlap and uniform frames are
-not partially updated.
+not partially updated. Partial-setter tests check per-LED field preservation
+and concurrent color/intensity updates. Dummy-shell tests cover combined and
+separate controls, complete argument validation, automatic saving, and removal
+of manual persistence commands.
 
 Automatic-refresh tests cover the first delayed frame, repeated initialization
 without duplicate workers, unchanged/off frames, automatic output, absolute
@@ -55,7 +60,7 @@ python "${env:ZEPHYR_BASE}/scripts/twister" -T firmware/tests `
   --inline-logs --outdir build/twister-qemu
 ```
 
-Confirm **five scenarios and 76 cases pass**, with no missing or skipped cases.
+Confirm **seventeen scenarios and 291 cases pass**, with no missing or skipped cases.
 The same report validator used by CI checks the run against its generated plan:
 
 ```sh
@@ -122,8 +127,11 @@ From a shell providing Perl and `diff`:
 
 ```sh
 perl "$ZEPHYR_BASE/scripts/checkpatch.pl" --no-tree --file \
-  firmware/src/lighting.c firmware/src/lighting.h \
-  firmware/src/lighting_gamma_table.h firmware/src/main.c \
+  firmware/src/lighting/lighting.c firmware/src/lighting/lighting.h \
+  firmware/src/lighting/lighting_gamma_table.h firmware/src/main.c \
+  firmware/src/storage/storage.c firmware/src/storage/storage.h \
+  firmware/src/lighting/lighting_settings.c firmware/src/lighting/lighting_settings.h \
+  firmware/src/lighting/lighting_shell.c \
   firmware/Kconfig firmware/tests/lighting/src/main.c \
   firmware/tests/lighting_refresh/src/main.c
 git diff --check
@@ -145,12 +153,12 @@ bounds on a real board.
 ## Physical checks
 
 Use the selected board and exact strip after following [wiring](setup.md#connections).
-Replace the demo loop before manual API checks so it does not overwrite requests.
+Use the [developer UART shell](storage.md#developer-uart-shell) for manual checks.
 Unless stated otherwise, these checks assume automatic refresh is enabled.
 
 | Check | Expected result |
 | --- | --- |
-| Boot and reboot | Initialization clears every LED; the application starts the RGB/intensity demo |
+| Boot and reboot | Saved RGB/intensity appear on the first frame; otherwise white/50%; power always starts on; no animation |
 | Red, green, blue at 100% intensity | Correct channel order on every LED |
 | Different colors/intensities on adjacent LEDs | Correct individual output; other LEDs retain their selections |
 | Update values with automatic refresh enabled | Output changes at a subsequent scheduled refresh without manual apply |
@@ -163,3 +171,12 @@ Unless stated otherwise, these checks assume automatic refresh is enabled.
 
 Record the board revision, strip part/revision, supply and I/O voltages, firmware
 commit, and measured waveform when reporting a physical pass.
+
+Storage integration tests use actual NVS/ZMS Settings backends and simulated
+flash, including payload bit flips, failed writes, remounts, and physical
+duplicate-write avoidance. Persistence tests use a blocking fake to verify
+setters during I/O, retry scheduling, stale queued callbacks, power-only changes,
+and debounce during continuous edits. Boot fixtures cover current and legacy
+formats, legacy power on/off, zero intensity, missing/malformed/unsupported or
+oversized records, and backend initialization/read errors. See [manual retention checks](storage.md#manual-retention-checks)
+for the hardware power-cycle procedure.

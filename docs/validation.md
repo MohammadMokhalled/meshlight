@@ -8,6 +8,90 @@ The referenced files under `build/` are ignored local artifacts and are not
 included in a fresh clone. Use the [test commands](testing.md) to reproduce
 automated checks, or download reports from an available Actions run.
 
+## Automatic persistence simplification — 2026-10-24
+
+All 17 QEMU scenarios and 291 test cases passed, with no skipped cases. The CI
+report validator, C style checks, whitespace checks, and updated documentation
+links passed. Coverage includes v2 colors/intensities, both legacy power values,
+zero intensity, missing/corrupt/future/oversized records, backend failures,
+debounce without checkpoints, power-only changes, edits during writes, stale
+queued callbacks, retry backoff, and backend physical duplicate-write avoidance.
+
+Both physical board targets built with the developer shell enabled and disabled.
+The nRF `build/dk-dev` image was rebuilt but not flashed. These checks did not
+verify physical flash retention or interrupted-write recovery on hardware.
+
+| Board / shell | Flash | RAM |
+| --- | --- | --- |
+| nRF54L15 / off | 62,208 B | 18,736 B |
+| nRF54L15 / on | 93,692 B | 23,576 B |
+| STM32WB55 / off | 52,648 B | 17,088 B |
+| STM32WB55 / on | 84,880 B | 22,080 B |
+
+Local artifacts: `build/simple-persistence-tests/`,
+`build/simple-persistence-tests.log`, `build/simple-persistence-checkpatch.log`,
+and `build/simple-persist-*.log`. The [manual retention checks](storage.md#manual-retention-checks)
+include restoration with power on after a saved selection was switched off.
+
+## Separate lighting shell controls — 2026-10-24
+
+All 13 QEMU scenarios and 177 cases passed, including partial color/intensity
+updates, field preservation, concurrent setters, automatic persistence, invalid
+shell arguments, and rejection of the removed shell save/restore commands.
+The CI report validator, C style checks, whitespace checks, and updated
+documentation links passed. Both physical board targets built with the shell
+enabled and disabled; the nRF `build/dk-dev` image was also rebuilt.
+
+Local artifacts are `build/shell-controls-tests/`, `build/shell-controls-tests.log`,
+`build/shell-controls-checkpatch.log`, and `build/shell-controls-persist-*.log`.
+These checks did not flash or exercise the updated firmware on hardware.
+
+## Module layout — 2026-10-23
+
+After grouping sources under `src/lighting/` and `src/storage/`, all 13 scenarios
+and 162 test cases passed again. Both board targets built with the developer
+shell enabled and disabled, with unchanged flash/RAM usage. The CI report
+validator, C style checks, whitespace checks, and documentation links passed.
+Local artifacts are `build/layout-verified/`, `build/layout-tests.log`,
+`build/layout-checkpatch.log`, and `build/layout-persist-*.log`.
+
+## Persistent settings and developer shell — 2026-10-23
+
+Validated with nRF Connect SDK 3.3.0 and its matching Windows toolchain. Both
+products use explicit application/storage partitions and boot at flash offset
+zero. The STM32 Settings partition was moved inside its declared 808 KiB flash
+range; compile-time checks reject partition bounds errors and code overlap.
+
+| Check | Result |
+| --- | --- |
+| nRF54L15 production build | Passed; 62976 bytes flash and 18792 bytes RAM |
+| nRF54L15 developer-shell build | Passed; 94448 bytes flash and 23632 bytes RAM |
+| STM32WB55 production build | Passed; 53404 bytes flash and 17152 bytes RAM |
+| STM32WB55 developer-shell build | Passed; 85636 bytes flash and 22144 bytes RAM |
+| QEMU firmware tests | Passed; all 13 scenarios and 162 cases, no skips |
+| CI report validator | Passed against the fresh test plan |
+| Python tooling tests | Passed; all 36 tests |
+| Workflow lint, C/Kconfig style, whitespace | Passed |
+| Flashing, UART interaction, physical power cycles | Not performed |
+
+The Settings tests exercise actual NVS/ZMS backends with simulated NOR/RRAM,
+payload bit flips, failed writes, live backend reconstruction, and sector
+rotation. Lighting tests include six boot conditions, save timing and retries,
+concurrent setters during storage I/O, restore races, malformed/oversized records,
+explicit repair after failed restore, and shell command parsing. The production
+ELFs/configurations were also checked for CRC enablement, flash bounds, zero boot
+offset, shell exclusion, and the appropriate logging backend.
+
+Local artifacts: `build/persist-verified/twister.json` and `testplan.json`,
+`build/persist-verified.log`, `build/persist-python-tests.log`,
+`build/persist-checkpatch-final.log`, `build/persist-repair-checkpatch.log`, and
+the `build/persist-{dk2,dk-shell,wb55,wb55-shell}` build directories with their
+corresponding `-final.log` files. These builds resolve the normal Git version.
+See [manual retention checks](storage.md#manual-retention-checks) for remaining
+hardware validation. No claim of physical retention or flash timing is made.
+
+## Documentation review — 2026-10-22
+
 During the documentation review on **2026-10-22**, all **34 Python tooling tests**
 passed. Existing `build/rtw/twister.json` and `build/citw/twister.json` reports
 were inspected: each records all five scenarios and 76 cases passing.

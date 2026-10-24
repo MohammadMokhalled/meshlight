@@ -1,0 +1,21 @@
+common:
+  tags: [storage, settings]
+  platform_allow: [qemu_cortex_m3]
+  integration_platforms: [qemu_cortex_m3]
+  harness: ztest
+tests:
+  meshlight.storage.nvs:
+    extra_configs:
+      - CONFIG_NVS=y
+      - CONFIG_SETTINGS_NVS=y
+      - CONFIG_NVS_DATA_CRC=y
+      - CONFIG_SETTINGS_NVS_SECTOR_COUNT=2
+  meshlight.storage.zms:
+    extra_configs:
+      - CONFIG_ZMS=y
+      - CONFIG_SETTINGS_ZMS=y
+      - CONFIG_ZMS_DATA_CRC=y
+      - CONFIG_ZMS_NO_DOUBLE_WRITE=y
+      - CONFIG_SETTINGS_ZMS_CUSTOM_SECTOR_COUNT=y
+      - CONFIG_SETTINGS_ZMS_SECTOR_COUNT=4
+      - CONFIG_FLASH_SIMULATOR_EXPLICIT_ERASE=n

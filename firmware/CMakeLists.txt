@@ -45,8 +45,9 @@ if(NOT MESHLIGHT_GIT_SHA MATCHES "^[0-9a-f]+$")
   message(FATAL_ERROR "Invalid MESHLIGHT_GIT_SHA: ${MESHLIGHT_GIT_SHA}")
 endif()
 configure_file(cmake/meshlight_version.h.in generated/meshlight_version.h @ONLY)
-target_include_directories(app PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_include_directories(app PRIVATE src ${CMAKE_CURRENT_BINARY_DIR}/generated)
 message(STATUS "Meshlight version: ${MESHLIGHT_VERSION} (${MESHLIGHT_GIT_SHA})")
 
-# Keep staged per-LED state and gamma-corrected rendering behind the lighting API.
-target_sources(app PRIVATE src/main.c src/lighting.c)
+target_sources(app PRIVATE src/main.c)
+add_subdirectory(src/storage)
+add_subdirectory(src/lighting)

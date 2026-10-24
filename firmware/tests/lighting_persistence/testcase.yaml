@@ -1,0 +1,25 @@
+common:
+  tags: [lighting, settings, shell]
+  platform_allow: [qemu_cortex_m3]
+  integration_platforms: [qemu_cortex_m3]
+  harness: ztest
+tests:
+  meshlight.persistence.empty: {}
+  meshlight.persistence.restored:
+    extra_args: [BOOT_MODE=1]
+  meshlight.persistence.legacy_off:
+    extra_args: [BOOT_MODE=2]
+  meshlight.persistence.corrupt:
+    extra_args: [BOOT_MODE=3]
+  meshlight.persistence.future:
+    extra_args: [BOOT_MODE=4]
+  meshlight.persistence.unavailable:
+    extra_args: [BOOT_MODE=5]
+  meshlight.persistence.legacy_on:
+    extra_args: [BOOT_MODE=6]
+  meshlight.persistence.zero_intensity:
+    extra_args: [BOOT_MODE=7]
+  meshlight.persistence.read_error:
+    extra_args: [BOOT_MODE=8]
+  meshlight.persistence.oversized:
+    extra_args: [BOOT_MODE=9]

@@ -1,0 +1,24 @@
+/ {
+	flashcontroller_test: flash-controller@10000000 {
+		compatible = "zephyr,sim-flash";
+		reg = <0x10000000 0x8000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		erase-value = <0xff>;
+		test_flash: flash-sim@0 {
+			compatible = "soc-nv-flash";
+			reg = <0 0x8000>;
+			erase-block-size = <4096>;
+			write-block-size = <4>;
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+				storage_partition: partition@0 {
+					label = "storage";
+					reg = <0 0x8000>;
+				};
+			};
+		};
+	};
+};

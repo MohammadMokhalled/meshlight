@@ -8,5 +8,6 @@ set(DTC_OVERLAY_FILE "${LIGHTING_TEST_ROOT}/app.overlay")
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(meshlight_lighting_refresh_tests)
 
-target_include_directories(app PRIVATE ../../src)
-target_sources(app PRIVATE ../../src/lighting.c src/main.c)
+target_include_directories(app PRIVATE ../../src ../support)
+add_subdirectory(../../src/lighting lighting)
+target_sources(app PRIVATE ../support/fake_storage.c src/main.c)
