@@ -105,7 +105,7 @@ The shell is off by default. Enable its build-time flag using the supplied
 fragment (use a separate build directory):
 
 ```sh
-west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk-dev firmware -- -DEXTRA_CONF_FILE=dev_shell.conf
+west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk-dev firmware -- "-DEXTRA_CONF_FILE=dev_shell.conf"
 west flash -d build/dk-dev
 ```
 
