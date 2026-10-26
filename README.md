@@ -5,13 +5,17 @@ STM32 boards. A shared C module provides per-LED color and intensity, gamma
 correction, and automatic refresh, with hardware configuration kept in devicetree
 overlays.
 
-**Current scope:** a standalone lighting controller with persistent settings and
-an optional developer UART shell.
-Bluetooth Mesh messaging and Android control are planned; neither is implemented.
+**Current scope:** a Bluetooth Mesh lighting node with persistent settings,
+individual LED control, and an optional developer UART shell. Use nRF Mesh for
+provisioning, native power/intensity controls, and raw vendor RGB messages.
+See the [mesh setup and protocol guide](docs/mesh.md).
 
 ## What it does
 
 - Controls individual LEDs or the whole strip using RGB values and 0–100% intensity.
+- Uses one mesh element for 1–339 LEDs; exposes LED count and control capabilities.
+- Enables Relay and GATT Proxy by default, configurable through Kconfig and mesh.
+- Factory-resets with app Node Reset or a button-0 hold longer than 30 seconds.
 - Applies gamma 2.2 through an integer lookup pipeline, without runtime floating point.
 - Refreshes output in a dedicated Zephyr thread every 50 ms by default (20 Hz).
 - Preserves selected colors and intensities while the strip is off.
@@ -83,6 +87,8 @@ firmware/src/
     CMakeLists.txt
     storage.h              Public storage API
     storage.c              Zephyr Settings backend access
+  mesh/                    Provisioning, models, protocol, and platform support
+  device_control/          Button hold detection and journaled factory reset
 ```
 
 Each module owns its source list. Include public interfaces as
@@ -118,11 +124,10 @@ threading contract, and refresh options.
 
 ## Testing and releases
 
-The firmware test inventory contains **291 cases across seventeen scenarios**:
-23 manual-mode cases for each of 1, 6, and 17 LEDs, plus eight automatic-refresh
-cases at each of 50 ms and 20 ms, 190 persistence/shell cases across ten boot
-conditions, and 16 storage integration cases across ZMS and NVS. CI builds both
-products with and without the shell and runs these scenarios in QEMU. Python tests also cover versioning, packaging, report validation, and
+The firmware tests cover rendering, persistence/shell behavior, ZMS/NVS storage,
+reset recovery, model transactions/transitions, protocol validation, and
+1/6/17/300/339-LED configurations. CI discovers all test scenarios, builds both
+products with and without the shell, and runs the tests in QEMU. Python tests also cover versioning, packaging, report validation, and
 release publication using a mocked GitHub interface.
 
 See [testing](docs/testing.md) for commands and coverage, and the
@@ -134,8 +139,10 @@ validation. See [versioning and CI](docs/ci.md) for downloads and release steps.
 
 ## Project status
 
-Network transport, provisioning, Android control, and secure secret storage are
-future work. The developer shell provides current interactive control. Gamma 2.2 is fixed, and small nonzero values
+Mesh control and No-OOB provisioning are implemented. Physical phone/radio,
+reset, and relay acceptance checks are documented separately from emulator
+results. A custom controller UI, OOB authentication, and animation streaming
+are future work. Gamma 2.2 is fixed, and small nonzero values
 can round to black with eight-bit output.
 
 ## License

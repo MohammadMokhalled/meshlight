@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+target_sources(app PRIVATE mesh.c provisioning.c composition.c models.c control.c protocol.c transaction.c)
+target_sources(app PRIVATE platform/crypto_diagnostics.c)
+target_link_options(zephyr_interface INTERFACE -Wl,--wrap=psa_import_key)
+if(CONFIG_BOARD_NUCLEO_WB55RG AND CONFIG_BT_STM32_IPM AND CONFIG_BT_EXT_ADV)
+  target_sources(app PRIVATE platform/stm32wb.c)
+  target_link_options(zephyr_interface INTERFACE -Wl,--wrap=SHCI_C2_BLE_Init)
+  # Match ST's extended HCI mailbox layout without modifying the installed SDK.
+  set(ipm_snippets "${ZEPHYR_BINARY_DIR}/include/generated/snippets-sections.ld")
+  file(STRINGS "${ipm_snippets}" ipm_sections)
+  list(FILTER ipm_sections EXCLUDE REGEX "stm32wbx/ipm[.]ld")
+  list(JOIN ipm_sections "\n" ipm_sections)
+  file(WRITE "${ipm_snippets}" "${ipm_sections}\n")
+  zephyr_linker_sources(SECTIONS ${CMAKE_CURRENT_SOURCE_DIR}/platform/stm32wb_ipm.ld)
+endif()

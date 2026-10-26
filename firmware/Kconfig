@@ -5,6 +5,25 @@ mainmenu "Meshlight configuration"
 
 source "Kconfig.zephyr"
 
+menuconfig MESHLIGHT_MESH
+	bool "Bluetooth Mesh lighting control"
+	default n
+	select HWINFO
+	select GPIO
+	select REBOOT
+
+if MESHLIGHT_MESH
+config MESHLIGHT_COMPANY_ID
+	hex "Mesh company identifier (0xffff is the development placeholder)"
+	default 0xffff
+	range 0x0000 0xffff
+
+config MESHLIGHT_MODEL_ID
+	hex "Meshlight vendor model identifier"
+	default 0x0001
+	range 0x0000 0xffff
+endif
+
 menu "Lighting"
 
 config LIGHTING_SAVE_DELAY_MS

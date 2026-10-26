@@ -26,6 +26,7 @@ BUILD_ASSERT(!DT_SAME_NODE(DT_MEM_FROM_FIXED_PARTITION(CODE_NODE),
 
 K_MUTEX_DEFINE(storage_mutex);
 static bool ready;
+#define RESET_KEY "meshlight/reset"
 
 static bool valid_key(const char *key)
 {
@@ -44,6 +45,121 @@ int storage_init(void)
 	if (!ready) {
 		err = settings_subsys_init();
 		ready = err == 0;
+	}
+	k_mutex_unlock(&storage_mutex);
+	return err;
+}
+
+int storage_load_subtree(const char *subtree)
+{
+	int err;
+
+	if (k_is_in_isr()) {
+		return -EWOULDBLOCK;
+	}
+	if (!valid_key(subtree)) {
+		return -EINVAL;
+	}
+	k_mutex_lock(&storage_mutex, K_FOREVER);
+	err = ready ? settings_load_subtree(subtree) : -ENODEV;
+	k_mutex_unlock(&storage_mutex);
+	return err;
+}
+
+int storage_delete(const char *key)
+{
+	int err;
+
+	if (k_is_in_isr()) {
+		return -EWOULDBLOCK;
+	}
+	if (!valid_key(key)) {
+		return -EINVAL;
+	}
+	k_mutex_lock(&storage_mutex, K_FOREVER);
+	err = ready ? settings_delete(key) : -ENODEV;
+	k_mutex_unlock(&storage_mutex);
+	return err;
+}
+
+int storage_reset_begin(void)
+{
+	const uint8_t marker = 1;
+
+	return storage_store(RESET_KEY, &marker, sizeof(marker));
+}
+
+int storage_reset_pending(bool *pending)
+{
+	uint8_t marker;
+	size_t length;
+	int err;
+
+	if (pending == NULL) {
+		return -EINVAL;
+	}
+	err = storage_restore(RESET_KEY, &marker, sizeof(marker), &length);
+	if (err == -ENOENT) {
+		*pending = false;
+		return 0;
+	}
+	if (err == 0) {
+		/* Any present marker requests recovery, including unknown versions. */
+		*pending = true;
+	}
+	return err;
+}
+
+struct reset_search {
+	char key[SETTINGS_MAX_NAME_LEN + 1];
+	int error;
+};
+
+static int find_reset_key(const char *key, size_t length, settings_read_cb read,
+			  void *arg, void *param)
+{
+	struct reset_search *search = param;
+
+	ARG_UNUSED(read);
+	ARG_UNUSED(arg);
+	if (length && strcmp(key, RESET_KEY) != 0) {
+		if (strnlen(key, sizeof(search->key)) >= sizeof(search->key)) {
+			search->error = -E2BIG;
+		} else {
+			strcpy(search->key, key);
+		}
+		return 1;
+	}
+	return 0;
+}
+
+int storage_reset_finish(void)
+{
+	struct reset_search search;
+	bool pending;
+	int err = storage_reset_pending(&pending);
+
+	if (err || !pending) {
+		return err;
+	}
+	k_mutex_lock(&storage_mutex, K_FOREVER);
+	for (;;) {
+		memset(&search, 0, sizeof(search));
+		/* Delete outside enumeration: backends may compact on each deletion. */
+		err = settings_load_subtree_direct(NULL, find_reset_key, &search);
+		if (search.error) {
+			err = search.error;
+		}
+		if (err || search.key[0] == '\0') {
+			break;
+		}
+		err = settings_delete(search.key);
+		if (err) {
+			break;
+		}
+	}
+	if (!err) {
+		err = settings_delete(RESET_KEY);
 	}
 	k_mutex_unlock(&storage_mutex);
 	return err;

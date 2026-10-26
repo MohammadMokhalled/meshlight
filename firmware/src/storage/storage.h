@@ -3,6 +3,7 @@
 #define MESHLIGHT_STORAGE_H_
 
 #include <stddef.h>
+#include <stdbool.h>
 
 /** Initialize Zephyr Settings, without loading any subsystem. Retryable/idempotent. */
 int storage_init(void);
@@ -17,5 +18,16 @@ int storage_store(const char *key, const void *data, size_t length);
  * All three APIs require thread context; ISR calls return -EWOULDBLOCK.
  */
 int storage_restore(const char *key, void *data, size_t capacity, size_t *actual_length);
+
+/** Load registered handlers only in this subtree, after their subsystem is ready. */
+int storage_load_subtree(const char *subtree);
+/** Delete one key. Requires init and thread context. */
+int storage_delete(const char *key);
+
+/** Durable reset journal. Finish only after all Settings producers are stopped. */
+int storage_reset_begin(void);
+int storage_reset_pending(bool *pending);
+/** Delete all Settings records; remove the reset marker last. Retryable. */
+int storage_reset_finish(void);
 
 #endif

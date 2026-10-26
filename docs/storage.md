@@ -21,8 +21,19 @@ uses NVS with payload CRC. Entire values are read so CRC verification runs.
 No filesystem or additional application checksum is used. The wrapper never
 erases storage to recover from an error. A blank partition is initialized by
 the backend. CRC detects accidental corruption; Settings does not encrypt secrets.
-Future Bluetooth Mesh code must perform its own initialization and Settings load;
-lighting never calls the global `settings_load()`.
+The mesh module initializes Bluetooth/mesh before calling
+`storage_load_subtree("bt")`; lighting never calls the global `settings_load()`.
+Mesh configuration and SDK persistent key records share this backend. See
+[mesh control and factory reset](mesh.md) for reset-journal ownership.
+
+The CRC configuration is part of the persistent storage format. An nRF54L15
+previously running the reference `onoff-app` has CRC-disabled ZMS records;
+Meshlight enables `CONFIG_ZMS_DATA_CRC`. Such a board needs the one-time
+[Settings-only erase](mesh.md#first-installation) before provisioning Meshlight.
+Otherwise existing record names can fail CRC and prevent future writes, even
+after logical resets. Subsequent firmware updates preserve the CRC-enabled
+format and Settings partition. Production code uses public Settings APIs;
+it does not bypass integrity checks or modify backend directory structures.
 
 ## Flash layout
 
@@ -33,14 +44,16 @@ constrains the linker to the application partition.
 | Board | Application offset / size | Settings offset / size |
 | --- | --- | --- |
 | nRF54L15 | `0` / 1392 KiB | `0x15c000` / 36 KiB |
-| STM32WB55 | `0` / 800 KiB | `0xc8000` / 8 KiB |
+| STM32WB55 | `0` / 776 KiB | `0xc2000` / 32 KiB |
 
 Offsets are relative to the memory device (STM32 flash base is `0x08000000`).
 The Nordic storage location is unchanged from the SDK. The SDK's default STM32
 storage at `0xd9000` lies outside its declared 808 KiB application flash device;
-the project moves storage into its last two accessible 4 KiB pages. Neither
+the project reserves its last eight accessible 4 KiB pages. Neither
 board uses the SDK's unused MCUboot slots. Adding a bootloader or Mesh capacity
-requirements later needs a deliberate partition-layout review.
+requirements later needs a deliberate partition-layout review. The first mesh
+installation permits a one-time Settings reset; subsequent updates preserve
+this layout. See [installation](mesh.md#first-installation).
 
 Preserve these partitions across firmware updates. A full-chip erase removes
 saved state; do not use it when testing update retention. Enable backend CRC
@@ -81,7 +94,7 @@ until they stop; there is no periodic checkpoint. Unchanged setters and power
 changes neither request a save nor extend the deadline. Choosing startup defaults
 or restoring a saved selection alone does not write a snapshot.
 
-The worker copies requested values and clears a pending flag under the lighting
+The worker copies committed selections and clears a pending flag under the lighting
 mutex, then releases it before encoding and flash I/O. Later edits set the flag
 and schedule another save; completing an older write never clears a newer edit.
 A deadline check prevents an already queued callback from saving too early after
