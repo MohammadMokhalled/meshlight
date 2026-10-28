@@ -20,6 +20,14 @@ The emulator smoke check covered cold startup, explicit demo entry, light detail
 
 ## Test layers
 
+CI integration was checked locally on 28 October 2026: 60 JVM/Robolectric
+cases, 132 screenshot comparisons, and four API 37 emulator instrumentation
+tests passed. Debug, unsigned release, instrumentation APK builds, coverage,
+and lint also passed (lint warnings remain). The first instrumentation attempt
+hit host native-memory exhaustion; retrying with two Gradle workers and a
+1 GiB daemon heap passed. Hosted workflow execution remains to be verified
+after pushing the workflow changes.
+
 | Layer | Coverage | Location |
 | --- | --- | --- |
 | JVM protocol and planning | Vendor payload validation, standard short/extended statuses, transition conversion, selection planning, property preservation, gradients, scheduling and transaction IDs | `app/src/test/java/com/example/meshlightcontroller/` |
@@ -54,6 +62,30 @@ For repeated work, filter local tests with `--tests 'com.example.meshlightcontro
 The instrumentation runner uses `HiltTestApplication`; activity tests use `HiltAndroidRule` before the Compose activity rule. Debug and instrumentation configurations explicitly use the same JUnit 4.13.2 dependency so AGP's consistent dependency resolution does not select the older JUnit transitively supplied by debug tooling.
 
 ## Reports and artifacts
+
+### PR and CI automation
+
+The repository's [shared validation workflow](../../.github/workflows/firmware.yml)
+runs every Android layer when any file under `android-app/` changes. Host tests,
+screenshots, lint, coverage, debug/release APK builds, and compilation of the
+instrumentation APK run on Windows. Instrumentation runs on an API 37 x86_64
+Google APIs emulator on Ubuntu. Both jobs verify the workflow's exact Git tree
+and use JDK 25, SDK `android-37.0`, build tools 36.0.0, and the checked-in wrapper.
+CI validates the checked-in screenshot references without updating them.
+
+Unchanged PRs skip Android jobs. Unchanged push/tag CI reuses APKs from a
+successful ancestor push run with exactly matching Android source and validated
+checksums/test evidence. If none is available, all Android checks and builds run.
+The required gate rejects unexpected skips or failures. See
+[CI behavior and downloads](../../docs/ci.md#android-validation-and-reuse).
+
+The `android-apks` Actions artifact contains both debug and unsigned release
+APKs, original build/test metadata, and SHA-256 checksums. Reports and logs are
+uploaded separately, including available diagnostics on failure, for 30 days.
+Final tagged GitHub Releases also contain both APKs permanently. App versions
+remain controlled by the Gradle build file; no release signing is configured.
+
+### Local output paths
 
 - [Local tests](../app/build/reports/tests/testDebugUnitTest/index.html)
 - [Coverage](../app/build/reports/jacoco/jacocoDebugReport/html/index.html)

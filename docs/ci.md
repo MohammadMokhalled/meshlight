@@ -1,10 +1,10 @@
-# Firmware versioning and CI
+# Versioning and CI
 
 [Project overview](../README.md) · [Setup and wiring](setup.md) · [Lighting API](lighting.md) · [Testing](testing.md)
 
-The workflows build every product in the inventory, run the firmware and Python
-tooling tests, and package traceable firmware. Only a final version tag triggers
-GitHub Release publication.
+The workflows build every firmware product, run firmware and Python tooling
+tests, and validate Android changes. Only a final version tag triggers GitHub
+Release publication, including Android APKs.
 
 ## Versions
 
@@ -89,8 +89,8 @@ fail version validation rather than silently publishing a different version.
 
 Both entry workflows call the same build/test workflow. Every product builds
 with `west build --no-sysbuild` in the pinned Nordic Linux toolchain container.
-Twister executes all discovered test scenarios on `qemu_cortex_m3` (currently
-five scenarios and 76 test cases). Report validation rejects missing scenarios,
+Twister executes all discovered test scenarios on `qemu_cortex_m3`. Report
+validation rejects missing scenarios,
 skips, failures, and missing individual test cases. This verifies emulator
 behavior; physical strip validation remains in [testing](testing.md).
 
@@ -113,6 +113,55 @@ All Actions artifacts have 30-day retention, including temporary tag-build artif
 Final Release assets are independent of that retention setting.
 Reruns replace that workflow run's temporary artifacts; each product package
 records the attempt that actually built it, including when only failed jobs rerun.
+
+### Android validation and reuse
+
+Any net change under `android-app/`, including documentation, reference images,
+deletions, or renames, runs the full Android build and test set. PRs compare the
+exact base with the reconstructed merge; branch pushes compare the event's
+before/after revisions across the entire push. An unchanged PR deliberately
+skips Android work, while firmware validation and the required `PR CI` gate run.
+
+Android host checks run on Windows with JDK 25, SDK `android-37.0`, build tools
+36.0.0, and the checked-in Gradle wrapper. They build debug, unsigned release,
+and instrumentation APKs, and run JVM/Robolectric tests, JaCoCo, lint, and every
+Compose screenshot comparison. Windows aligns with the existing screenshot
+reference environment. A separate Ubuntu job runs all instrumentation tests
+on an API 37 x86_64 Google APIs emulator with KVM. Every check disables the
+configuration cache. Missing/empty reports, failed or skipped tests, and lint
+errors fail validation; lint warnings and coverage reporting retain their
+existing policy. Reference screenshots are never updated automatically.
+
+For unchanged Android source, push CI searches successful push runs of `ci.yml`
+for an `android-apks` artifact whose source is an ancestor of the current commit
+and whose Android Git subtree matches exactly. Tags and new branches without
+a comparison revision also use this lookup. Artifacts must have a compatible
+contract, complete passing test evidence, original provenance, both APKs, and
+valid checksums. PR artifacts cannot supply reused APKs. Expired/missing
+artifacts, incompatible provenance, invalid downloads, or unavailable discovery
+fall back to a complete Android build and test run. The first integrated run
+therefore bootstraps its own Android artifacts.
+
+Each successful Android build or reuse uploads `android-apks`, containing:
+
+- `meshlight-android-debug.apk` and `meshlight-android-release-unsigned.apk`.
+- `android-build-metadata.json`: original source/tree, repository, run/attempt,
+  app versions, toolchain identity, and passing test counts.
+- `ANDROID-SHA256SUMS` for both APKs and their metadata.
+
+Reused files retain their original bytes and provenance and are uploaded again
+for the current run. Its summary identifies the build/reuse/skip decision and
+the original build when reused. Reports, coverage, screenshot differences, and
+available emulator/build logs are separate diagnostic artifacts, including on
+failure. All Actions artifacts retain the existing 30-day lifetime. Intermediate
+`android-host`, `android-device`, and `android-reused` artifacts pass results
+between jobs; only `android-apks` is a validated distributable artifact.
+
+Android keeps its source-controlled `versionName` and `versionCode`; firmware's
+alpha/beta/final identity does not change them. Release APKs remain unsigned.
+The standard debug APK uses Android's generated development signing key, with
+no repository signing secret. Physical Bluetooth acceptance remains manual;
+see the [Android test strategy](../android-app/docs/TESTING.md).
 
 ## Publishing a release
 
@@ -138,10 +187,13 @@ git push origin v0.1.0
 ```
 
 The tag chooses the final version and rebuilds every product with that exact
-version embedded. Only after all builds and tests pass does publication create
-a draft, upload every package, the workflow metadata, and aggregate checksums,
+version embedded. Only after firmware validation and Android build/reuse pass
+does publication create a draft, upload every firmware package, both Android
+APKs with their original metadata/checksums, the workflow metadata, and aggregate checksums,
 then publish it with generated release notes. Publication has `contents: write`;
-other jobs have `contents: read`. It uses the built-in `GITHUB_TOKEN`.
+other jobs have `contents: read`. Android artifact lookup also has `actions: read`.
+Publication uses the built-in `GITHUB_TOKEN`. Final Release assets have no
+automatic expiry; this permanent storage is limited to final `vX.Y.Z` tags.
 
 A retry resumes an incomplete draft. A complete published release is checked
 and left unchanged; published assets are never overwritten. Tag identity is

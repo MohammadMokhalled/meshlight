@@ -77,6 +77,15 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 
 The installable debug APK is `app/build/outputs/apk/debug/app-debug.apk`. Release signing is not configured.
 
+PRs and push CI run all Android builds and automated tests when any file under
+`android-app/` changes. Unchanged PRs skip Android validation; unchanged CI
+reuses validated APKs for the same Android source, or runs the full checks if
+none is available. Download `android-apks` from Actions for debug and unsigned
+release APKs, original build metadata, and checksums. Actions artifacts last
+30 days; final tagged GitHub Releases keep both APKs without automatic expiry.
+Android's app versions remain controlled by its Gradle build file. See
+[CI and reuse details](../docs/ci.md#android-validation-and-reuse).
+
 Local tests cover protocol vectors, malformed statuses, level/transition conversion, planning, scheduling, transaction spacing, encrypted backup compatibility, metadata, offline apply, partial recovery, UI behavior, and state restoration. Robolectric runs UI tests without a device; its Android 16 tests include the required JDK module access flags.
 
 Screenshot tests cover 12 screens across nine width/height combinations plus dark theme and 1.5× text, for 132 cases. References are in `app/src/screenshotTestDebug/reference/`. After an intentional visual change, run `:app:updateDebugScreenshotTest`, inspect the images, then run validation again.

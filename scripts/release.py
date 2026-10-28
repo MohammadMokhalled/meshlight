@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from version import FINAL, git
+from android_ci import FILES as ANDROID_FILES, validate as validate_android
 
 
 def verify_workflow_identity(repo, info, sha, ref):
@@ -70,11 +71,13 @@ def validate_packages(directory, info):
     return paths
 
 
-def publish(repository, info, directory):
+def publish(repository, info, directory, android_directory):
     tag = info["ref"].removeprefix("refs/tags/")
     if info["channel"] != "final" or not FINAL.fullmatch(tag) or tag[1:] != info["version"]:
         raise ValueError("Only final vx.y.z tag builds can publish releases")
     packages = validate_packages(directory, info)
+    validate_android(android_directory, info["android"]["tree"], repository=repository, require_push=True)
+    android_paths = [Path(android_directory) / name for name in sorted(ANDROID_FILES)]
     ref = json.loads(gh("api", f"repos/{repository}/git/ref/tags/{quote(tag, safe='')}"))["object"]
     for _ in range(10):
         if ref["type"] != "tag":
@@ -88,9 +91,9 @@ def publish(repository, info, directory):
     checksum_path = Path(directory) / "SHA256SUMS"
     checksum_path.write_text("".join(
         f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}\n"
-        for path in [*packages, metadata_path]
+        for path in [*packages, *android_paths, metadata_path]
     ), encoding="utf-8")
-    assets = [*packages, metadata_path, checksum_path]
+    assets = [*packages, *android_paths, metadata_path, checksum_path]
     expected_names = {path.name for path in assets}
     endpoint = f"repos/{repository}/releases/tags/{quote(tag, safe='')}"
     existing = gh("api", endpoint, missing_ok=True)
@@ -100,7 +103,7 @@ def publish(repository, info, directory):
             raise ValueError("Published release has missing or unexpected assets; it will not be modified")
         published = json.loads(gh("release", "download", tag, "--repo", repository,
                                   "--pattern", "build-metadata.json", "--output", "-"))
-        for key in ("version", "source_commit", "tree", "products"):
+        for key in ("version", "source_commit", "tree", "products", "android"):
             if published.get(key) != info.get(key):
                 raise ValueError(f"Published release {key} differs; it will not be modified")
         print(f"Release {tag} is already published and complete; no assets changed")
@@ -116,20 +119,23 @@ def publish(repository, info, directory):
     if not uploaded["draft"] or {asset["name"] for asset in uploaded["assets"]} != expected_names:
         raise ValueError("Draft upload is incomplete or draft state changed; release was not published")
     gh("release", "edit", tag, "--repo", repository, "--draft=false")
-    print(f"Published {tag} with {len(packages)} product packages")
+    print(f"Published {tag} with {len(packages)} firmware packages and both Android APKs")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--metadata", type=Path, required=True)
     parser.add_argument("--packages", type=Path, required=True)
+    parser.add_argument("--android", type=Path, required=True)
     args = parser.parse_args()
     try:
         info = json.loads(args.metadata.read_text(encoding="utf-8"))
         verify_workflow_identity(Path(__file__).resolve().parents[1], info,
                                  os.environ["GITHUB_SHA"], os.environ["GITHUB_REF"])
-        publish(os.environ["GITHUB_REPOSITORY"], info, args.packages)
-    except (ValueError, OSError, KeyError, zipfile.BadZipFile) as error:
+        validate_android(args.android, info["android"]["tree"], Path(__file__).resolve().parents[1],
+                         os.environ["GITHUB_REPOSITORY"], require_push=True)
+        publish(os.environ["GITHUB_REPOSITORY"], info, args.packages, args.android)
+    except (ValueError, OSError, KeyError, TypeError, zipfile.BadZipFile) as error:
         parser.exit(1, f"Release error: {error}\n")
 
 
