@@ -131,12 +131,20 @@ jobs:
             "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
             -DEXTRA_CONF_FILE=dev_shell.conf 2>&1 | tee "meshlight/build/$PRODUCT-dev.log"
       - name: Package firmware
+        # Keep the normal six-LED image as the release artifact.
         env:
           PRODUCT: ${{ matrix.id }}
         run: |
           python3 meshlight/scripts/ci.py package --metadata meshlight/build/ci-metadata.json \
             --product "$PRODUCT" --build-dir "meshlight/build/$PRODUCT" \
             --dependencies meshlight/build/dependencies.json --output-dir meshlight/build/packages
+      - name: Build maximum strip capacity
+        env:
+          PRODUCT: ${{ matrix.id }}
+          BOARD: ${{ matrix.board }}
+        run: |
+          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT-max" meshlight/firmware -- \
+            -DEXTRA_DTC_OVERLAY_FILE=long_strip.overlay 2>&1 | tee "meshlight/build/$PRODUCT-max.log"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: meshlight-${{ matrix.id }}-${{ needs.metadata.outputs.version }}

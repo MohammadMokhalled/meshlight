@@ -1,0 +1,28 @@
+/ {
+	chosen {
+		/* Never use the board's real provisioning/lighting partition. */
+		zephyr,settings-partition = &crypto_test_settings;
+	};
+	crypto_test_flash: flash-controller@10000000 {
+		compatible = "zephyr,sim-flash";
+		reg = <0x10000000 0x4000>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		erase-value = <0xff>;
+		flash-sim@0 {
+			compatible = "soc-nv-flash";
+			reg = <0 0x4000>;
+			erase-block-size = <4096>;
+			write-block-size = <4>;
+			partitions {
+				compatible = "fixed-partitions";
+				#address-cells = <1>;
+				#size-cells = <1>;
+				crypto_test_settings: partition@0 {
+					label = "crypto-test-settings";
+					reg = <0 0x4000>;
+				};
+			};
+		};
+	};
+};

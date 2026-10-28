@@ -13,8 +13,11 @@ physical LEDs. QEMU is the firmware test platform used by CI.
 | [lighting](../firmware/tests/lighting/) | 1, 6, and 17 LEDs; automatic refresh disabled | 23 | 69 |
 | [lighting_refresh](../firmware/tests/lighting_refresh/) | 6 LEDs; automatic refresh at 50 ms and 20 ms | 8 | 16 |
 | lighting persistence and shell | 10 boot conditions | 19 | 190 |
-| Settings storage integration | NVS and ZMS with simulated flash | 8 | 16 |
-| **Firmware total** | **17 scenarios** | | **291** |
+| Settings storage integration | NVS and ZMS with simulated flash, including legacy CRC rejection and reset retries | 11 | 22 |
+| Mesh engine and opcode adapters | 1, 6, 17, 300 and 339 LEDs | 20 | 100 |
+| Mesh crypto resources | Real PSA imports and encrypted Settings with simulated flash | 2 | 2 |
+| Lighting reset quiescence | Save already in flight | 1 | 1 |
+| **Firmware total** | **24 scenarios** | | **400** |
 
 Manual-mode tests cover initialization and retry, per-LED and uniform updates,
 requested-state copies, invalid arguments, power restoration, gamma reference
@@ -60,7 +63,7 @@ python "${env:ZEPHYR_BASE}/scripts/twister" -T firmware/tests `
   --inline-logs --outdir build/twister-qemu
 ```
 
-Confirm **seventeen scenarios and 291 cases pass**, with no missing or skipped cases.
+Confirm every discovered scenario and case passes, with no missing or skipped cases.
 The same report validator used by CI checks the run against its generated plan:
 
 ```sh
@@ -70,6 +73,23 @@ python scripts/ci.py verify-tests --report build/twister-qemu/twister.json --exp
 Twister writes JSON, JUnit XML, and per-scenario logs under the output directory.
 The validator checks the discovered plan rather than hard-coding the current
 scenario count; update this inventory when adding tests.
+
+The mesh suite compiles the production parser, transaction cache, transition
+engine, lighting code, and opcode adapters. A capturing transport verifies
+acknowledged/unacknowledged handling and configured publications without a
+Bluetooth controller. Fake strip devices cover 1/6/17/300/339 LEDs. Storage
+integration runs against both real Settings backends with simulated flash and
+injected deletion failures. These tests are discovered by the existing CI
+Twister job; each board also builds the maximum-length overlay in CI.
+
+Phone commissioning and physical radio checks remain a separate
+[hardware acceptance checklist](mesh.md#hardware-acceptance-checklist).
+
+The `mesh_crypto` suite additionally uses real PSA key import and encrypted ITS
+storage. It checks AppKey installation, the separate AppKey configuration
+record, and capacity for both generations of two subnets and two AppKeys. It uses a
+dedicated simulated Settings partition, including when built for a physical
+board; it never accesses that board's provisioning or lighting records.
 
 ## Other firmware checks
 

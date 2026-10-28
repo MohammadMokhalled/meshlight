@@ -52,7 +52,7 @@ its result.
 
 Each `struct lighting_led_state` contains RGB channels in **0–255** and intensity
 in **0–100%**. LED indices start at zero at the strip's DIN end. A separate
-strip-wide on/off setting controls whether those values are rendered.
+per-LED runtime on/off selection controls whether those values are rendered.
 
 | Call | Behavior |
 | --- | --- |
@@ -63,13 +63,28 @@ strip-wide on/off setting controls whether those values are rendered.
 | `lighting_set_led_color(index, &rgb)` / `lighting_set_all_color(&rgb)` | Changes RGB while preserving each targeted LED's intensity |
 | `lighting_set_led_intensity(index, intensity)` / `lighting_set_all_intensity(intensity)` | Changes intensity while preserving each targeted LED's RGB |
 | `lighting_get_led(index, &state)` | Copies one LED's raw requested values into caller-owned storage |
-| `lighting_set_on(on)` / `lighting_get_on(&on)` | Changes or reads the runtime strip-wide on/off selection |
+| `lighting_set_on(on)` / `lighting_get_on(&on)` | Sets every LED's runtime power selection / reads whether any LED is enabled |
+| `lighting_update(target, &update)` | Atomically changes selected RGB/intensity/power properties for one index or `LIGHTING_TARGET_ALL` |
+| `lighting_get_status(target, &status)` | Consistent snapshot; ALL includes representative RGB, mean intensity, any-enabled power, and mixed flags |
+| `lighting_quiesce()` | Permanently closes control and drains pending/in-flight saves before reset |
 | `lighting_apply()` | Renders and synchronously transmits the complete current selection |
 
 After successful initialization, repeated `lighting_init()` calls preserve
 state, perform no transfer, and keep the existing worker schedule. Initialization
 failures can be retried; state controls remain unavailable until initialization
 succeeds.
+
+The masked update uses `LIGHTING_UPDATE_RGB`, `LIGHTING_UPDATE_INTENSITY`, and
+`LIGHTING_UPDATE_POWER`. Power Off preserves color/intensity. Every LED starts
+enabled after reboot. Whole-strip commands overwrite only the selected property
+on all LEDs; there is no additional master brightness or power layer.
+
+`LIGHTING_UPDATE_TRANSIENT` is reserved for transition frames. These frames
+update the live selection but leave the persistent selection unchanged. A final
+ordinary update commits the settled value and requests the usual debounced save,
+even if it equals the final transient frame. Concurrent color saves never capture
+an intermediate transition intensity. Reset uses `lighting_quiesce()` from its
+private worker; controls then return `-ESHUTDOWN` and the refresh thread exits.
 
 Setters store requests without transmitting. With automatic refresh enabled,
 the worker renders the latest requests at its next scheduled refresh. While off,

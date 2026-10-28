@@ -1,0 +1,15 @@
+common:
+  tags: [mesh, lighting]
+  platform_allow: [qemu_cortex_m3]
+  integration_platforms: [qemu_cortex_m3]
+  harness: ztest
+tests:
+  meshlight.mesh.six: {}
+  meshlight.mesh.one:
+    extra_args: [EXTRA_DTC_OVERLAY_FILE=one.overlay]
+  meshlight.mesh.seventeen:
+    extra_args: [EXTRA_DTC_OVERLAY_FILE=seventeen.overlay]
+  meshlight.mesh.long:
+    extra_args: [EXTRA_DTC_OVERLAY_FILE=long.overlay]
+  meshlight.mesh.maximum:
+    extra_args: [EXTRA_DTC_OVERLAY_FILE=maximum.overlay]

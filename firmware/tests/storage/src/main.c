@@ -9,6 +9,12 @@
 #include <zephyr/irq_offload.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/ztest.h>
+#if defined(CONFIG_SETTINGS_ZMS)
+#include <settings/settings_zms.h>
+#include <zephyr/sys/hash_function.h>
+#include <zephyr/sys/crc.h>
+#include "zms_priv.h"
+#endif
 
 static const uint8_t value[] = {0x31, 0x74, 0xc9, 0x52, 0x88, 0x2a, 0xf6, 0x19,
 				0x63, 0xdb, 0x40, 0x95, 0x0a, 0xe1, 0xb7, 0x28};
@@ -205,11 +211,125 @@ static void isr(const void *unused)
 	zassert_equal(storage_init(), -EWOULDBLOCK);
 	zassert_equal(storage_store("key", value, sizeof(value)), -EWOULDBLOCK);
 	zassert_equal(storage_restore("key", buf, sizeof(buf), &length), -EWOULDBLOCK);
+	zassert_equal(storage_delete("key"), -EWOULDBLOCK);
+	zassert_equal(storage_load_subtree("bt"), -EWOULDBLOCK);
+	zassert_equal(storage_reset_begin(), -EWOULDBLOCK);
+}
+
+ZTEST(storage, test_reset_marker_survives_failed_cleanup_and_retry)
+{
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(flashcontroller_test));
+	const struct flash_simulator_cb callbacks = {.write_byte = fail_write};
+	bool pending;
+	uint8_t buf[32];
+	size_t length;
+
+	zassert_ok(storage_store("meshlight/lighting", value, sizeof(value)));
+	zassert_ok(storage_store("bt/mesh/Net", value, sizeof(value)));
+	zassert_ok(storage_store("its/test-key", value, sizeof(value)));
+	zassert_ok(storage_reset_begin());
+	zassert_ok(storage_reset_pending(&pending));
+	zassert_true(pending);
+	flash_simulator_set_callbacks(dev, &callbacks);
+	int err = storage_reset_finish();
+
+	flash_simulator_set_callbacks(dev, NULL);
+	zassert_true(err < 0);
+	zassert_ok(storage_reset_pending(&pending));
+	zassert_true(pending);
+	zassert_ok(storage_reset_finish());
+	zassert_ok(storage_reset_pending(&pending));
+	zassert_false(pending);
+	zassert_equal(storage_restore("meshlight/lighting", buf, sizeof(buf), &length), -ENOENT);
+	zassert_equal(storage_restore("bt/mesh/Net", buf, sizeof(buf), &length), -ENOENT);
+	zassert_equal(storage_restore("its/test-key", buf, sizeof(buf), &length), -ENOENT);
+	zassert_ok(storage_reset_finish());
+}
+
+static unsigned int subtree_loads;
+static int subtree_set(const char *name, size_t len, settings_read_cb read, void *arg)
+{
+	uint8_t buf[32];
+
+	if (strcmp(name, "value") || len != sizeof(value)) {
+		return -EINVAL;
+	}
+	if (read(arg, buf, len) != len || memcmp(buf, value, len)) {
+		return -EIO;
+	}
+	subtree_loads++;
+	return 0;
+}
+SETTINGS_STATIC_HANDLER_DEFINE(load_probe, "load_probe", NULL, subtree_set, NULL, NULL);
+
+ZTEST(storage, test_subtree_load_and_delete)
+{
+	uint8_t buf[32];
+	size_t length;
+
+	zassert_ok(storage_store("load_probe/value", value, sizeof(value)));
+	subtree_loads = 0;
+	zassert_ok(storage_load_subtree("unrelated"));
+	zassert_equal(subtree_loads, 0);
+	zassert_ok(storage_load_subtree("load_probe"));
+	zassert_equal(subtree_loads, 1);
+	zassert_ok(storage_delete("load_probe/value"));
+	zassert_equal(storage_restore("load_probe/value", buf, sizeof(buf), &length), -ENOENT);
+	zassert_equal(storage_delete(NULL), -EINVAL);
+	zassert_equal(storage_load_subtree(""), -EINVAL);
 }
 
 ZTEST(storage, test_interrupt_rejection)
 {
 	irq_offload(isr, NULL);
+}
+
+ZTEST(storage, test_appkey_record_crc_and_legacy_name_rejection)
+{
+	const char *key = "bt/mesh/AppKey/0";
+	/* SDK app_key_val: NetKey index, updated flag, and two opaque PSA IDs. */
+	static const uint8_t record[11] = {0, 0, 0, 2, 0, 0, 0x20, 0, 0, 0, 0};
+	uint8_t buf[sizeof(record)];
+	size_t length;
+
+	zassert_ok(storage_store(key, record, sizeof(record)));
+	zassert_ok(storage_restore(key, buf, sizeof(buf), &length));
+	zassert_equal(length, sizeof(record));
+	zassert_mem_equal(buf, record, length);
+#if defined(CONFIG_SETTINGS_ZMS)
+	const struct device *dev = DEVICE_DT_GET(DT_NODELABEL(flashcontroller_test));
+	size_t size;
+	uint8_t *memory = flash_simulator_get_memory(dev, &size);
+	uint32_t id = ZMS_NAME_ID_FROM_HASH(sys_hash32(key, strlen(key)) & ZMS_HASH_MASK);
+	bool found = false;
+
+	/* Reproduce onoff-app's CRC-disabled ATE format: its metadata CRC8 is
+	 * valid, but the payload CRC32 is zero. Names cannot be silently reused
+	 * by the CRC-enabled backend, even if their actual bytes are unchanged.
+	 */
+	for (size_t i = 0; i + sizeof(struct zms_ate) <= size; i += sizeof(struct zms_ate)) {
+		struct zms_ate *entry = (struct zms_ate *)(memory + i);
+		struct zms_ate saved;
+
+		if (entry->id != id || entry->len != strlen(key) ||
+		    entry->data_crc != crc32_ieee(key, strlen(key))) {
+			continue;
+		}
+		saved = *entry;
+		entry->data_crc = 0;
+		entry->crc8 = crc8_ccitt(0xff, (uint8_t *)entry + 1, sizeof(*entry) - 1);
+		int err = storage_store(key, record, sizeof(record));
+
+		*entry = saved;
+		zassert_true(err < 0, "Legacy name must fail CRC, not report a successful save");
+		found = true;
+		break;
+	}
+	zassert_true(found, "Must inject a valid, CRC-disabled name record");
+#endif
+	zassert_ok(storage_store(key, record, sizeof(record)));
+	zassert_ok(storage_restore(key, buf, sizeof(buf), &length));
+	zassert_mem_equal(buf, record, sizeof(record));
 }
 
 ZTEST_SUITE(storage, NULL, setup, NULL, NULL, NULL);

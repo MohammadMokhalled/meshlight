@@ -1,0 +1,2 @@
+/* Compile-time capacity check for both supported boards; normal builds use six. */
+&lighting_strip { chain-length = <339>; };

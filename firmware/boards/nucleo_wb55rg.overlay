@@ -11,7 +11,7 @@
 	};
 };
 
-/* The SoC exposes 808 KiB to this image. Reserve the last two 4 KiB pages. */
+/* The SoC exposes 808 KiB. Reserve eight 4 KiB pages for lighting and mesh. */
 /delete-node/ &boot_partition;
 /delete-node/ &slot0_partition;
 /delete-node/ &slot1_partition;
@@ -20,14 +20,26 @@
 	partitions {
 		app_partition: partition@0 {
 			label = "image-0";
-			reg = <0 0xc8000>;
+			reg = <0 0xc2000>;
 		};
-		storage_partition: partition@c8000 {
+		storage_partition: partition@c2000 {
 			label = "storage";
-			reg = <0xc8000 0x2000>;
+			reg = <0xc2000 0x8000>;
 		};
 	};
 };
+
+/* ST extended HCI-only CPU2 firmware mailbox layout (as verified in onoff-app). */
+&usart1 {
+	current-speed = <115200>;
+	/delete-property/ hw-flow-control;
+};
+&lpuart1 {
+	/delete-property/ hw-flow-control;
+	status = "disabled";
+};
+&sram1 { reg = <0x20030000 0x800>; };
+&sram2 { reg = <0x20038000 0x2800>; };
 
 &spi1 {
 	status = "okay";

@@ -32,6 +32,50 @@ extern "C" {
 /** Maximum per-LED intensity, in percent. */
 #define LIGHTING_INTENSITY_MAX 100U
 
+/** Target the complete strip; other targets are zero-based LED indices. */
+#define LIGHTING_TARGET_ALL UINT16_MAX
+#define LIGHTING_UPDATE_RGB 0x01U
+#define LIGHTING_UPDATE_INTENSITY 0x02U
+#define LIGHTING_UPDATE_POWER 0x04U
+/** Render an intermediate transition frame without changing the saved selection. */
+#define LIGHTING_UPDATE_TRANSIENT 0x80U
+
+struct lighting_update {
+	uint8_t fields;
+	struct led_rgb rgb;
+	uint8_t intensity;
+	bool on;
+};
+
+struct lighting_status {
+	struct led_rgb rgb;
+	uint8_t intensity;
+	bool on;
+	/** LIGHTING_UPDATE_* bits identify properties that differ between LEDs. */
+	uint8_t mixed;
+	/** Changes on non-transient edits; allows transitions to notice local edits. */
+	uint32_t revision;
+};
+
+/**
+ * Atomically update selected properties of one LED or every LED.
+ * Validate the complete request before mutation. Unselected fields are preserved.
+ * RGB/intensity use the normal save debounce unless TRANSIENT is specified.
+ * Power is always runtime-only. Thread context required; returns -ESHUTDOWN
+ * after lighting_quiesce(), -EINVAL for invalid masks, -ERANGE for bad values.
+ */
+int lighting_update(uint16_t target, const struct lighting_update *update);
+
+/**
+ * Consistent requested-state snapshot. For ALL: RGB from LED 0, rounded mean
+ * intensity, any LED enabled, and per-property mixed flags. Output is unchanged
+ * on failure. Thread context required.
+ */
+int lighting_get_status(uint16_t target, struct lighting_status *status);
+
+/** Permanently reject controls and synchronously drain saves before factory reset. */
+int lighting_quiesce(void);
+
 /** Requested color and intensity of one LED, before output processing. */
 struct lighting_led_state {
 	/** RGB channels, each 0..255; optional Zephyr scratch space is ignored. */
@@ -175,7 +219,7 @@ int lighting_set_all_intensity(uint8_t intensity);
 int lighting_get_led(size_t index, struct lighting_led_state *state);
 
 /**
- * @brief Stage the strip-wide power setting without transmitting.
+ * @brief Enable or disable every LED without transmitting.
  *
  * Off makes the next apply transmit black while retaining every LED's RGB and
  * intensity. On makes the next apply render those selections, including zero
@@ -191,7 +235,7 @@ int lighting_get_led(size_t index, struct lighting_led_state *state);
 int lighting_set_on(bool on);
 
 /**
- * @brief Copy the requested strip-wide power setting.
+ * @brief Copy whether any LED's requested power selection is on.
  *
  * Does not transmit. The caller's output is unchanged on error.
  *

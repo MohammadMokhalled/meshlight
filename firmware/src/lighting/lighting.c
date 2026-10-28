@@ -64,7 +64,11 @@ static const struct device *const strip = DEVICE_DT_GET(STRIP_NODE);
 /* Only this module owns selections and transfer memory; no heap is needed. */
 static struct lighting_led_state led_states[STRIP_LENGTH];
 static struct led_rgb framebuffer[STRIP_LENGTH];
-static bool strip_on;
+static bool led_on[STRIP_LENGTH];
+/* Intermediate transition frames must never leak into a concurrent save. */
+static struct lighting_led_state persistent_states[STRIP_LENGTH];
+static bool quiesced;
+static uint32_t revision;
 static bool initialized;
 
 /* Hold through each complete transfer so setters cannot change a live frame. */
@@ -130,6 +134,11 @@ int lighting_init(void)
 	}
 	k_mutex_lock(&init_mutex, K_FOREVER);
 	k_mutex_lock(&lighting_mutex, K_FOREVER);
+	if (quiesced) {
+		k_mutex_unlock(&lighting_mutex);
+		k_mutex_unlock(&init_mutex);
+		return -ESHUTDOWN;
+	}
 	if (initialized) {
 		k_mutex_unlock(&lighting_mutex);
 		k_mutex_unlock(&init_mutex);
@@ -153,7 +162,8 @@ int lighting_init(void)
 	}
 	k_mutex_lock(&lighting_mutex, K_FOREVER);
 	memcpy(led_states, staged_states, sizeof(led_states));
-	strip_on = true;
+	memcpy(persistent_states, staged_states, sizeof(persistent_states));
+	memset(led_on, true, sizeof(led_on));
 	err = render_frame();
 	if (err == 0) {
 		k_work_init_delayable(&save_work, save_entry);
@@ -258,15 +268,9 @@ int lighting_get_led(size_t index, struct lighting_led_state *state)
 
 int lighting_set_on(bool on)
 {
-	int err = lock_initialized();
+	const struct lighting_update update = {.fields = LIGHTING_UPDATE_POWER, .on = on};
 
-	if (err != 0) {
-		return err;
-	}
-
-	strip_on = on;
-	k_mutex_unlock(&lighting_mutex);
-	return 0;
+	return lighting_update(LIGHTING_TARGET_ALL, &update);
 }
 
 int lighting_get_on(bool *on)
@@ -281,7 +285,10 @@ int lighting_get_on(bool *on)
 		return err;
 	}
 
-	*on = strip_on;
+	*on = false;
+	for (size_t i = 0; i < STRIP_LENGTH; i++) {
+		*on |= led_on[i];
+	}
 	k_mutex_unlock(&lighting_mutex);
 	return 0;
 }
@@ -309,27 +316,135 @@ int lighting_apply(void)
 static int set_selection(size_t first, size_t count, const struct led_rgb *rgb,
 			 const uint8_t *intensity)
 {
-	bool changed = false;
-	int err = lock_initialized();
+	struct lighting_update update = {0};
 
-	if (err != 0) {
+	if (rgb != NULL) {
+		update.fields |= LIGHTING_UPDATE_RGB;
+		update.rgb = *rgb;
+	}
+	if (intensity != NULL) {
+		update.fields |= LIGHTING_UPDATE_INTENSITY;
+		update.intensity = *intensity;
+	}
+	return lighting_update(count == STRIP_LENGTH ? LIGHTING_TARGET_ALL : first, &update);
+}
+
+static bool same_rgb(const struct led_rgb *a, const struct led_rgb *b)
+{
+	return a->r == b->r && a->g == b->g && a->b == b->b;
+}
+
+int lighting_update(uint16_t target, const struct lighting_update *update)
+{
+	const uint8_t properties = LIGHTING_UPDATE_RGB | LIGHTING_UPDATE_INTENSITY |
+				   LIGHTING_UPDATE_POWER;
+	bool changed = false;
+	bool transient;
+	size_t first, end;
+	int err;
+
+	if (update == NULL || !(update->fields & properties) ||
+	    (update->fields & ~(properties | LIGHTING_UPDATE_TRANSIENT))) {
+		return -EINVAL;
+	}
+	if ((target != LIGHTING_TARGET_ALL && target >= STRIP_LENGTH) ||
+	    ((update->fields & LIGHTING_UPDATE_INTENSITY) && update->intensity > 100)) {
+		return -ERANGE;
+	}
+	err = lock_initialized();
+	if (err) {
 		return err;
 	}
-	for (size_t i = first; i < first + count; i++) {
-		if (rgb != NULL) {
-			changed |= led_states[i].rgb.r != rgb->r ||
-				   led_states[i].rgb.g != rgb->g || led_states[i].rgb.b != rgb->b;
-			led_states[i].rgb = *rgb;
+	transient = update->fields & LIGHTING_UPDATE_TRANSIENT;
+	first = target == LIGHTING_TARGET_ALL ? 0 : target;
+	end = target == LIGHTING_TARGET_ALL ? STRIP_LENGTH : first + 1;
+	for (size_t i = first; i < end; i++) {
+		if (update->fields & LIGHTING_UPDATE_RGB) {
+			led_states[i].rgb = update->rgb;
+			if (!transient) {
+				changed |= !same_rgb(&persistent_states[i].rgb, &update->rgb);
+				persistent_states[i].rgb = update->rgb;
+			}
 		}
-		if (intensity != NULL) {
-			changed |= led_states[i].intensity != *intensity;
-			led_states[i].intensity = *intensity;
+		if (update->fields & LIGHTING_UPDATE_INTENSITY) {
+			led_states[i].intensity = update->intensity;
+			if (!transient) {
+				changed |= persistent_states[i].intensity != update->intensity;
+				persistent_states[i].intensity = update->intensity;
+			}
+		}
+		if (update->fields & LIGHTING_UPDATE_POWER) {
+			led_on[i] = update->on;
 		}
 	}
-	if (changed) {
-		request_save_locked();
+	if (!transient) {
+		/* Unchanged legacy setters still do not postpone saving. */
+		revision++;
+		if (changed) {
+			request_save_locked();
+		}
 	}
 	k_mutex_unlock(&lighting_mutex);
+	return 0;
+}
+
+int lighting_get_status(uint16_t target, struct lighting_status *status)
+{
+	struct lighting_status value = {0};
+	size_t first, end;
+	uint32_t sum = 0;
+	int err;
+
+	if (status == NULL) {
+		return -EINVAL;
+	}
+	if (target != LIGHTING_TARGET_ALL && target >= STRIP_LENGTH) {
+		return -ERANGE;
+	}
+	err = lock_initialized();
+	if (err) {
+		return err;
+	}
+	first = target == LIGHTING_TARGET_ALL ? 0 : target;
+	end = target == LIGHTING_TARGET_ALL ? STRIP_LENGTH : first + 1;
+	value.rgb = led_states[first].rgb;
+	value.revision = revision;
+	for (size_t i = first; i < end; i++) {
+		sum += led_states[i].intensity;
+		value.on |= led_on[i];
+		if (!same_rgb(&value.rgb, &led_states[i].rgb)) {
+			value.mixed |= LIGHTING_UPDATE_RGB;
+		}
+		if (led_states[i].intensity != led_states[first].intensity) {
+			value.mixed |= LIGHTING_UPDATE_INTENSITY;
+		}
+		if (led_on[i] != led_on[first]) {
+			value.mixed |= LIGHTING_UPDATE_POWER;
+		}
+	}
+	value.intensity = (sum + (end - first) / 2) / (end - first);
+	*status = value;
+	k_mutex_unlock(&lighting_mutex);
+	return 0;
+}
+
+int lighting_quiesce(void)
+{
+	struct k_work_sync sync;
+	bool started;
+	int err = lock_lighting();
+
+	if (err) {
+		return err;
+	}
+	quiesced = true;
+	started = initialized;
+	save_pending = false;
+	k_mutex_unlock(&lighting_mutex);
+	if (started) {
+		/* Never hold the lighting mutex while waiting for an in-flight write. */
+		(void)k_work_cancel_delayable_sync(&save_work, &sync);
+	}
 	return 0;
 }
 
@@ -367,7 +482,7 @@ static void save_entry(struct k_work *work)
 
 	ARG_UNUSED(work);
 	k_mutex_lock(&lighting_mutex, K_FOREVER);
-	if (!save_pending) {
+	if (!save_pending || quiesced) {
 		k_mutex_unlock(&lighting_mutex);
 		return;
 	}
@@ -379,7 +494,7 @@ static void save_entry(struct k_work *work)
 		k_mutex_unlock(&lighting_mutex);
 		return;
 	}
-	memcpy(staged_states, led_states, sizeof(staged_states));
+	memcpy(staged_states, persistent_states, sizeof(staged_states));
 	save_pending = false;
 	k_mutex_unlock(&lighting_mutex);
 
@@ -394,6 +509,10 @@ static void save_entry(struct k_work *work)
 	}
 	if (err != 0) {
 		k_mutex_lock(&lighting_mutex, K_FOREVER);
+		if (quiesced) {
+			k_mutex_unlock(&lighting_mutex);
+			return;
+		}
 		save_pending = true;
 		save_due_ms = k_uptime_get() + CONFIG_LIGHTING_SAVE_RETRY_MS;
 		(void)k_work_reschedule_for_queue(&persistence_queue, &save_work,
@@ -427,6 +546,10 @@ static int lock_initialized(void)
 		k_mutex_unlock(&lighting_mutex);
 		return -ENODEV;
 	}
+	if (quiesced) {
+		k_mutex_unlock(&lighting_mutex);
+		return -ESHUTDOWN;
+	}
 
 	return 0;
 }
@@ -453,7 +576,7 @@ static int render_frame(void)
 		const struct lighting_led_state *state = &led_states[i];
 		struct led_rgb color = {0};
 
-		if (strip_on) {
+		if (led_on[i]) {
 			color.r = render_channel(state->rgb.r, state->intensity);
 			color.g = render_channel(state->rgb.g, state->intensity);
 			color.b = render_channel(state->rgb.b, state->intensity);
@@ -490,6 +613,9 @@ static void refresh_entry(void *unused_a, void *unused_b, void *unused_c)
 		}
 		err = lighting_apply();
 		if (err != 0) {
+			if (err == -ESHUTDOWN) {
+				return;
+			}
 			LOG_ERR_RATELIMIT_RATE(REFRESH_ERROR_LOG_INTERVAL_MS,
 					      "LED strip refresh failed (%d)", err);
 		}
