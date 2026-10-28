@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from version import FINAL, git
+from ci import firmware_outputs
 
 
 def verify_workflow_identity(repo, info, sha, ref):
@@ -51,7 +52,7 @@ def validate_packages(directory, info):
                 if details.get(key) != info.get(key):
                     raise ValueError(f"Mismatched {key} in {path.name}")
             stem = path.stem
-            payload_names = {f"{stem}.{ext}" for ext in ("hex", "bin", "elf")} | {
+            payload_names = {f"{stem}{suffix}" for suffix in firmware_outputs(product)} | {
                 "build-metadata.json", "LICENSE"
             }
             if set(names) != payload_names | {"SHA256SUMS"}:

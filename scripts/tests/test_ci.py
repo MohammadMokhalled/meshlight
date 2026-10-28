@@ -115,6 +115,68 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Duplicate"):
             products(self.root)
 
+    def test_sysbuild_product_inventory_validates_build_mode(self):
+        item = {"id": "nrf5340dk", "board": "nrf5340dk/nrf5340/cpuapp", "sysbuild": True}
+        write_json(self.root / "firmware/products.json", [item])
+        self.assertEqual(products(self.root), [item])
+        item["sysbuild"] = "false"
+        write_json(self.root / "firmware/products.json", [item])
+        with self.assertRaisesRegex(ValueError, "boolean"):
+            products(self.root)
+
+    def test_product_capacity_overlay_must_be_a_filename(self):
+        item = {"id": "nrf52dk", "board": "nrf52dk/nrf52832",
+                "capacity_overlay": "nrf52_long_strip.overlay"}
+        write_json(self.root / "firmware/products.json", [item])
+        self.assertEqual(products(self.root), [item])
+        for invalid in ("../escape.overlay", True, "long_strip.conf"):
+            item["capacity_overlay"] = invalid
+            write_json(self.root / "firmware/products.json", [item])
+            with self.assertRaisesRegex(ValueError, "overlay filename"):
+                products(self.root)
+
+    def sysbuild_package(self):
+        self.info["products"] = [{"id": "nrf5340dk", "board": "nrf5340dk/nrf5340/cpuapp",
+                                  "sysbuild": True}]
+        app = self.build / "firmware"
+        app.mkdir()
+        (self.build / "zephyr").rename(app / "zephyr")
+        (self.build / "generated").rename(app / "generated")
+        radio = self.build / "ipc_radio/zephyr"
+        radio.mkdir(parents=True)
+        for ext in ("hex", "bin", "elf"):
+            (radio / f"zephyr.{ext}").write_bytes(b"network controller")
+        return self.packages()[0]
+
+    def test_sysbuild_package_includes_both_cores_and_checksums(self):
+        archive = self.sysbuild_package()
+        self.assertEqual(validate_packages(self.output, self.info), [archive])
+        with zipfile.ZipFile(archive) as bundle:
+            for ext in ("hex", "bin", "elf"):
+                self.assertEqual(bundle.read(f"{archive.stem}-cpunet.{ext}"), b"network controller")
+
+    def test_missing_network_firmware_blocks_packaging(self):
+        self.sysbuild_package()
+        (self.build / "ipc_radio/zephyr/zephyr.hex").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or empty firmware"):
+            self.packages()
+
+    def test_missing_network_firmware_blocks_release(self):
+        archive = self.sysbuild_package()
+        with zipfile.ZipFile(archive) as bundle:
+            payload = {name: bundle.read(name) for name in bundle.namelist()
+                       if not name.endswith("-cpunet.hex")}
+        # Recompute checksums: a consistent application-only archive is still incomplete.
+        payload["SHA256SUMS"] = "".join(
+            f"{hashlib.sha256(data).hexdigest()}  {name}\n"
+            for name, data in sorted(payload.items()) if name != "SHA256SUMS"
+        ).encode()
+        with zipfile.ZipFile(archive, "w") as bundle:
+            for name, data in payload.items():
+                bundle.writestr(name, data)
+        with self.assertRaisesRegex(ValueError, "Unexpected package contents"):
+            validate_packages(self.output, self.info)
+
     def fake_github(self, initial=None, incomplete_upload=False, wrong_tag=False):
         state = {"release": initial, "commands": []}
 

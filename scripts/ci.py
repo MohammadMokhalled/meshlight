@@ -24,8 +24,14 @@ def products(repo):
         raise ValueError("Product inventory must be a nonempty list")
     identifiers = set()
     for item in items:
-        if not isinstance(item, dict) or set(item) != {"id", "board"}:
-            raise ValueError("Each product must have exactly id and board")
+        if (not isinstance(item, dict) or not {"id", "board"} <= set(item)
+                or set(item) - {"id", "board", "sysbuild", "capacity_overlay"}):
+            raise ValueError("Each product must have id and board, with optional sysbuild/capacity_overlay")
+        if "sysbuild" in item and not isinstance(item["sysbuild"], bool):
+            raise ValueError("Product sysbuild must be a boolean")
+        if "capacity_overlay" in item and (not isinstance(item["capacity_overlay"], str)
+                or not re.fullmatch(r"[a-z0-9_]+\.overlay", item["capacity_overlay"])):
+            raise ValueError("Product capacity_overlay must be an overlay filename")
         if not isinstance(item["id"], str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", item["id"]):
             raise ValueError("Invalid product id")
         if item["id"] in identifiers:
@@ -73,6 +79,17 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def firmware_outputs(product):
+    """Archive suffixes and build-relative paths, including both nRF5340 cores."""
+    app = Path("firmware") if product.get("sysbuild", False) else Path()
+    outputs = {f".{ext}": app / "zephyr" / f"zephyr.{ext}"
+               for ext in ("hex", "bin", "elf")}
+    if product.get("sysbuild", False):
+        outputs.update({f"-cpunet.{ext}": Path("ipc_radio/zephyr") / f"zephyr.{ext}"
+                        for ext in ("hex", "bin", "elf")})
+    return outputs
+
+
 def package(build_dir, output_dir, product, info, dependencies=None):
     selected = next((p for p in info["products"] if p["id"] == product), None)
     if selected is None:
@@ -84,12 +101,13 @@ def package(build_dir, output_dir, product, info, dependencies=None):
     if not license_path.is_file() or not license_path.stat().st_size:
         raise ValueError("Missing or empty project license")
     payload = {"LICENSE": license_path.read_bytes()}
-    for extension in ("hex", "bin", "elf"):
-        source = Path(build_dir) / "zephyr" / f"zephyr.{extension}"
+    for suffix, relative_path in firmware_outputs(selected).items():
+        source = Path(build_dir) / relative_path
         if not source.is_file() or not source.stat().st_size:
             raise ValueError(f"Missing or empty firmware output: {source}")
-        payload[f"{name}.{extension}"] = source.read_bytes()
-    header = (Path(build_dir) / "generated/meshlight_version.h").read_text(encoding="utf-8")
+        payload[f"{name}{suffix}"] = source.read_bytes()
+    app_dir = Path(build_dir) / "firmware" if selected.get("sysbuild", False) else Path(build_dir)
+    header = (app_dir / "generated/meshlight_version.h").read_text(encoding="utf-8")
     if f'"{info["version"]}"' not in header or f'"{info["source_commit"]}"' not in header:
         raise ValueError("Generated firmware header differs from workflow metadata")
     # Ensure the linked firmware contains the identity, not just a generated header.

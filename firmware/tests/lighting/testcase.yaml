@@ -8,6 +8,8 @@ common:
     - native_sim/native/64
     - qemu_cortex_m3
     - nrf54l15dk/nrf54l15/cpuapp
+    - nrf52dk/nrf52832
+    - nrf5340dk/nrf5340/cpuapp
     - nucleo_wb55rg/stm32wb55xx
   harness: ztest
 tests:
