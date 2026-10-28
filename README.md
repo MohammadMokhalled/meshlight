@@ -22,7 +22,7 @@ See the [mesh setup and protocol guide](docs/mesh.md).
 - Restores lighting from CRC-protected Settings and saves actual changes in the background.
 - Provides an optional developer UART shell for manual control.
 - Serializes state updates and transfers with a mutex, using static storage.
-- Builds the same application for two boards with nRF Connect SDK **3.3.0**.
+- Builds the same application for four boards with nRF Connect SDK **3.3.0**.
 
 On boot, the application restores the last saved colors and intensities and
 always selects power on. With no valid snapshot it starts white at 50% intensity
@@ -40,11 +40,13 @@ always accepts ordinary RGB channels.
 | Board | Zephyr build target | Strip data output | Default I/O voltage |
 | --- | --- | --- | --- |
 | nRF54L15-DK | `nrf54l15dk/nrf54l15/cpuapp` | GPIO P1.12, PORT P1 physical position 15 | 1.8 V |
+| nRF52-DK (PCA10040 / nRF52832) | `nrf52dk/nrf52832` | GPIO P0.23 / Arduino D11 | 3 V |
+| nRF5340-DK (PCA10095) | `nrf5340dk/nrf5340/cpuapp` | GPIO P1.13 / Arduino D11 | 3 V |
 | NUCLEO-WB55RG | `nucleo_wb55rg` | PA7 / Arduino D11 / CN5 pin 4 | 3.3 V |
 
 For a 5 V strip, use a suitable level shifter, a strip power supply, and a common
 ground. Follow [setup and wiring](docs/setup.md) before connecting hardware.
-Both board configurations have recorded successful builds; visible output and
+Board configurations are checked by builds; visible output and
 signal timing still require [physical validation](docs/testing.md#physical-checks).
 
 ## Quick start
@@ -56,6 +58,18 @@ Then, from the repository root in an SDK 3.3.0 terminal, build and flash one boa
 # nRF54L15-DK
 west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk firmware
 west flash -d build/dk
+```
+
+```sh
+# nRF52-DK (nRF52832)
+west build --no-sysbuild -b nrf52dk/nrf52832 -d build/nrf52dk firmware
+west flash -d build/nrf52dk
+```
+
+```sh
+# nRF5340-DK: sysbuild includes the Bluetooth network-core firmware
+west build --sysbuild -b nrf5340dk/nrf5340/cpuapp -d build/nrf5340dk firmware
+west flash -d build/nrf5340dk
 ```
 
 ```sh
@@ -126,7 +140,7 @@ threading contract, and refresh options.
 
 The firmware tests cover rendering, persistence/shell behavior, ZMS/NVS storage,
 reset recovery, model transactions/transitions, protocol validation, and
-1/6/17/300/339-LED configurations. CI discovers all test scenarios, builds both
+1/6/17/300/339-LED configurations. CI discovers all test scenarios, builds all
 products with and without the shell, and runs the tests in QEMU. Python tests also cover versioning, packaging, report validation, and
 release publication using a mocked GitHub interface.
 

@@ -1,0 +1,73 @@
+// SPDX-License-Identifier: MIT
+#include <zephyr/dt-bindings/led/led.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,code-partition = &app_partition;
+	};
+	aliases {
+		led-strip = &lighting_strip;
+	};
+};
+
+/* Standalone image; reserve eight 4 KiB pages for lighting and mesh Settings. */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+/delete-node/ &storage_partition;
+&flash0 {
+	partitions {
+		app_partition: partition@0 {
+			label = "image-0";
+			reg = <0 0x78000>;
+		};
+		storage_partition: partition@78000 {
+			label = "storage";
+			reg = <0x78000 0x8000>;
+		};
+	};
+};
+
+&pinctrl {
+	lighting_i2s_default: lighting_i2s_default {
+		group1 {
+			/* D11 is DIN; D13 and D12 are unused I2S clocks. */
+			psels = <NRF_PSEL(I2S_SDOUT, 0, 23)>,
+				<NRF_PSEL(I2S_SCK_M, 0, 25)>,
+				<NRF_PSEL(I2S_LRCK_M, 0, 24)>;
+		};
+	};
+	lighting_i2s_sleep: lighting_i2s_sleep {
+		group1 {
+			psels = <NRF_PSEL(I2S_SDOUT, 0, 23)>,
+				<NRF_PSEL(I2S_SCK_M, 0, 25)>,
+				<NRF_PSEL(I2S_LRCK_M, 0, 24)>;
+			low-power-enable;
+		};
+	};
+};
+
+/* I2S DMA sends long strips continuously; nRF52832 SPIM has an 8-bit MAXCNT. */
+&spi2 {
+	status = "disabled";
+};
+
+&i2s0 {
+	status = "okay";
+	pinctrl-0 = <&lighting_i2s_default>;
+	pinctrl-1 = <&lighting_i2s_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	lighting_strip: ws2812@0 {
+		compatible = "worldsemi,ws2812-i2s";
+		reg = <0>;
+		chain-length = <6>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
+		/* 3.2 MHz bit clock: 1000 / 1100 give 312.5 / 625 ns high. */
+		lrck-period = <10>;
+		nibble-zero = <0x8>;
+		nibble-one = <0xc>;
+		reset-delay = <300>;
+	};
+};

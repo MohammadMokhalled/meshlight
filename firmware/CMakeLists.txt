@@ -3,8 +3,10 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(meshlight)
 
-set(MESHLIGHT_VERSION "" CACHE STRING "Resolved firmware SemVer (CI override)")
-set(MESHLIGHT_GIT_SHA "" CACHE STRING "Firmware source revision (CI override)")
+zephyr_get(MESHLIGHT_VERSION)
+zephyr_get(MESHLIGHT_GIT_SHA)
+set(MESHLIGHT_VERSION "${MESHLIGHT_VERSION}" CACHE STRING "Resolved firmware SemVer (CI override)")
+set(MESHLIGHT_GIT_SHA "${MESHLIGHT_GIT_SHA}" CACHE STRING "Firmware source revision (CI override)")
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(Git REQUIRED)
 if(NOT MESHLIGHT_VERSION)

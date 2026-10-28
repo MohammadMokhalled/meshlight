@@ -54,6 +54,18 @@ static void hold_provisioning_pair(void)
 		      PSA_SUCCESS);
 	held[held_count++] = key;
 	psa_reset_key_attributes(&attributes);
+
+	/* Provisioning must also perform P-256 with the smaller nRF52832 heap. */
+	uint8_t public_key[65], secret[32];
+	size_t public_length, secret_length;
+
+	zassert_equal(psa_export_public_key(key, public_key, sizeof(public_key), &public_length),
+		      PSA_SUCCESS);
+	zassert_equal(psa_raw_key_agreement(PSA_ALG_ECDH, key, public_key, public_length,
+					   secret, sizeof(secret), &secret_length), PSA_SUCCESS);
+	zassert_equal(secret_length, sizeof(secret));
+	/* Private scalar 1 times its own public point yields that point's X coordinate. */
+	zassert_mem_equal(secret, &public_key[1], sizeof(secret));
 }
 
 ZTEST(mesh_crypto, test_provisioned_node_accepts_both_appkeys)

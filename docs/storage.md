@@ -16,8 +16,8 @@ missing values or `-ENOSPC` with the required length for an undersized buffer.
 Other errors leave the reported length zero; never consume the buffer on error.
 All functions require thread context and serialize their operations.
 
-The nRF54L15 uses ZMS with payload CRC and duplicate-write avoidance; STM32WB55
-uses NVS with payload CRC. Entire values are read so CRC verification runs.
+The nRF54L15 uses ZMS with payload CRC and duplicate-write avoidance; nRF52832,
+nRF5340 and STM32WB55 use NVS with payload CRC. Entire values are read so CRC verification runs.
 No filesystem or additional application checksum is used. The wrapper never
 erases storage to recover from an error. A blank partition is initialized by
 the backend. CRC detects accidental corruption; Settings does not encrypt secrets.
@@ -37,20 +37,24 @@ it does not bypass integrity checks or modify backend directory structures.
 
 ## Flash layout
 
-Both boards run a standalone image at flash offset zero. Devicetree explicitly
+All boards run a standalone image at flash offset zero. Devicetree explicitly
 separates the application from Settings, and `CONFIG_USE_DT_CODE_PARTITION=y`
 constrains the linker to the application partition.
 
 | Board | Application offset / size | Settings offset / size |
 | --- | --- | --- |
 | nRF54L15 | `0` / 1392 KiB | `0x15c000` / 36 KiB |
+| nRF52832 | `0` / 480 KiB | `0x78000` / 32 KiB |
+| nRF5340 application core | `0` / 992 KiB | `0xf8000` / 32 KiB |
 | STM32WB55 | `0` / 776 KiB | `0xc2000` / 32 KiB |
 
 Offsets are relative to the memory device (STM32 flash base is `0x08000000`).
-The Nordic storage location is unchanged from the SDK. The SDK's default STM32
+The nRF54L15 and nRF5340 storage locations are unchanged from the SDK. The
+nRF52832 reserves 32 KiB rather than the SDK's 24 KiB. The SDK's default STM32
 storage at `0xd9000` lies outside its declared 808 KiB application flash device;
-the project reserves its last eight accessible 4 KiB pages. Neither
-board uses the SDK's unused MCUboot slots. Adding a bootloader or Mesh capacity
+the project reserves its last eight accessible 4 KiB pages. The nRF5340 network
+core has a separate 256 KiB flash device and does not store application Settings.
+No board uses the SDK's unused MCUboot slots. Adding a bootloader or Mesh capacity
 requirements later needs a deliberate partition-layout review. The first mesh
 installation permits a one-time Settings reset; subsequent updates preserve
 this layout. See [installation](mesh.md#first-installation).
