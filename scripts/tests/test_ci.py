@@ -10,6 +10,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from android_fixtures import artifact
+from android_ci import FILES as ANDROID_FILES
 from ci import IMAGE, ROOT, package, products, verify_twister, write_json
 from release import publish, validate_packages
 
@@ -22,6 +24,7 @@ class ArtifactTests(unittest.TestCase):
         self.info = {
             "version": "0.1.0", "channel": "final", "ref": "refs/tags/v0.1.0",
             "source_commit": "a" * 40, "tree": "b" * 40,
+            "android": {"tree": "d" * 40},
             "products": [{"id": "one", "board": "board/one"},
                          {"id": "two", "board": "board/two"}],
             "toolchain_image": IMAGE, "manifest_sha256": "c" * 64,
@@ -35,6 +38,8 @@ class ArtifactTests(unittest.TestCase):
         for ext in ("hex", "bin", "elf"):
             (self.build / f"zephyr/zephyr.{ext}").write_bytes(b"firmware\0" + b"0.1.0\0" + b"a" * 40 + b"\0")
         self.output = self.root / "packages"
+        self.android = self.root / "android"
+        artifact(self.android)
 
     def packages(self):
         return [package(self.build, self.output, p["id"], self.info) for p in self.info["products"]]
@@ -70,7 +75,7 @@ class ArtifactTests(unittest.TestCase):
             for name, data in payload.items():
                 bundle.writestr(name, data)
         with patch("release.gh") as mock, self.assertRaisesRegex(ValueError, "package contents"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         mock.assert_not_called()
 
     def test_missing_firmware_fails_packaging(self):
@@ -94,7 +99,7 @@ class ArtifactTests(unittest.TestCase):
     def test_missing_product_blocks_publication(self):
         self.packages()[1].unlink()
         with patch("release.gh") as mock, self.assertRaisesRegex(ValueError, "every product"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         mock.assert_not_called()
 
     def test_corrupt_payload_blocks_publication(self):
@@ -177,7 +182,7 @@ class ArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unexpected package contents"):
             validate_packages(self.output, self.info)
 
-    def fake_github(self, initial=None, incomplete_upload=False, wrong_tag=False):
+    def fake_github(self, initial=None, incomplete_upload=False, wrong_tag=False, missing_asset=None):
         state = {"release": initial, "commands": []}
 
         def call(*args, **kwargs):
@@ -193,8 +198,12 @@ class ArtifactTests(unittest.TestCase):
                 state["release"]["assets"] = [{"name": Path(p).name} for p in paths]
                 if incomplete_upload:
                     state["release"]["assets"].pop()
+                if missing_asset:
+                    state["release"]["assets"] = [asset for asset in state["release"]["assets"] if asset["name"] != missing_asset]
             elif args[:2] == ("release", "download"):
                 return json.dumps(self.info)
+            elif args[:2] == ("release", "edit"):
+                state["release"]["draft"] = False
             return ""
         return state, call
 
@@ -202,31 +211,74 @@ class ArtifactTests(unittest.TestCase):
         self.packages()
         state, fake = self.fake_github()
         with patch("release.gh", side_effect=fake):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         commands = [c[:2] for c in state["commands"]]
         self.assertLess(commands.index(("release", "create")), commands.index(("release", "upload")))
         self.assertLess(commands.index(("release", "upload")), commands.index(("release", "edit")))
+        uploaded = {asset["name"] for asset in state["release"]["assets"]}
+        self.assertTrue(ANDROID_FILES.issubset(uploaded))
+        aggregate = (self.output / "SHA256SUMS").read_text()
+        for name in ANDROID_FILES:
+            self.assertIn(f"{hashlib.sha256((self.android / name).read_bytes()).hexdigest()}  {name}\n", aggregate)
+
+    def test_missing_or_corrupt_android_apk_blocks_publication_before_github(self):
+        self.packages()
+        for mode in ("missing", "corrupt"):
+            artifact(self.android)
+            apk = self.android / "meshlight-android-debug.apk"
+            if mode == "missing":
+                apk.unlink()
+            else:
+                apk.write_bytes(b"corrupt")
+            with self.subTest(mode=mode), patch("release.gh") as mock, self.assertRaises(ValueError):
+                publish("owner/repo", self.info, self.output, self.android)
+            mock.assert_not_called()
+
+    def test_reused_android_keeps_original_commit_and_run_in_final_release(self):
+        self.packages()
+        original = artifact(self.android, source="e" * 40, run_id="42", run_attempt="2")
+        state, fake = self.fake_github()
+        with patch("release.gh", side_effect=fake):
+            publish("owner/repo", self.info, self.output, self.android)
+        self.assertEqual(json.loads((self.android / "android-build-metadata.json").read_text()), original)
+        self.assertFalse(state["release"]["draft"])
+
+    def test_wrong_android_source_and_pr_artifacts_cannot_be_released(self):
+        self.packages()
+        for changes in ({"android_tree": "e" * 40}, {"event": "pull_request"}):
+            artifact(self.android, **changes)
+            with self.subTest(changes=changes), patch("release.gh") as mock, self.assertRaises(ValueError):
+                publish("owner/repo", self.info, self.output, self.android)
+            mock.assert_not_called()
 
     def test_failed_upload_does_not_publish(self):
         self.packages()
         state, fake = self.fake_github(incomplete_upload=True)
         with patch("release.gh", side_effect=fake), self.assertRaisesRegex(ValueError, "incomplete"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
+        self.assertFalse(any(c[:2] == ("release", "edit") for c in state["commands"]))
+
+    def test_incomplete_android_upload_leaves_release_as_draft(self):
+        self.packages()
+        state, fake = self.fake_github(missing_asset="meshlight-android-release-unsigned.apk")
+        with patch("release.gh", side_effect=fake), self.assertRaisesRegex(ValueError, "incomplete"):
+            publish("owner/repo", self.info, self.output, self.android)
+        self.assertTrue(state["release"]["draft"])
         self.assertFalse(any(c[:2] == ("release", "edit") for c in state["commands"]))
 
     def test_draft_retry_resumes_without_recreating(self):
         self.packages()
         state, fake = self.fake_github({"draft": True, "assets": []})
         with patch("release.gh", side_effect=fake):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         self.assertFalse(any(c[:2] == ("release", "create") for c in state["commands"]))
 
     def test_published_retry_never_writes_assets(self):
         paths = self.packages()
-        names = [p.name for p in paths] + ["build-metadata.json", "SHA256SUMS"]
+        names = [p.name for p in paths] + sorted(ANDROID_FILES) + ["build-metadata.json", "SHA256SUMS"]
         state, fake = self.fake_github({"draft": False, "assets": [{"name": n} for n in names]})
         with patch("release.gh", side_effect=fake):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         self.assertFalse(any(c[:2] in (("release", "upload"), ("release", "edit"),
                                       ("release", "create")) for c in state["commands"]))
 
@@ -234,17 +286,17 @@ class ArtifactTests(unittest.TestCase):
         self.packages()
         state, fake = self.fake_github({"draft": False, "assets": []})
         with patch("release.gh", side_effect=fake), self.assertRaisesRegex(ValueError, "will not be modified"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         self.assertFalse(any(c[:2] == ("release", "upload") for c in state["commands"]))
 
     def test_moved_tag_and_prerelease_cannot_publish(self):
         self.packages()
         _, fake = self.fake_github(wrong_tag=True)
         with patch("release.gh", side_effect=fake), self.assertRaisesRegex(ValueError, "Remote release tag"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         self.info["channel"] = "alpha"
         with patch("release.gh") as mock, self.assertRaisesRegex(ValueError, "Only final"):
-            publish("owner/repo", self.info, self.output)
+            publish("owner/repo", self.info, self.output, self.android)
         mock.assert_not_called()
 
 

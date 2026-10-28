@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 from version import git, resolve
+from android_ci import source_info
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ("ghcr.io/nrfconnect/sdk-nrf-toolchain@sha256:"
@@ -59,11 +60,12 @@ def prepare(repo, base=None, head=None):
     return git(repo, "write-tree") if base else git(repo, "rev-parse", "HEAD^{tree}")
 
 
-def metadata(repo, ref, base=None, head=None, pr_number=None):
+def metadata(repo, ref, base=None, head=None, pr_number=None, before=None):
     version = resolve(repo, "refs/heads/master" if base else ref,
                       base or "HEAD", ci=True, pr_number=pr_number, pr_head=head)
     tree = git(repo, "write-tree") if base else git(repo, "rev-parse", "HEAD^{tree}")
     result = dict(version, products=products(repo), tree=tree,
+                  android=source_info(repo, tree, ref, base, before),
                   source_commit=head or version["commit"], base_commit=base,
                   pr_number=pr_number, toolchain_image=IMAGE,
                   sdk="nRF Connect SDK 3.3.0",
@@ -168,6 +170,7 @@ def main():
     meta.add_argument("--base")
     meta.add_argument("--head")
     meta.add_argument("--pr-number", type=int)
+    meta.add_argument("--before")
     meta.add_argument("--output", type=Path, required=True)
     pack = commands.add_parser("package")
     pack.add_argument("--metadata", type=Path, required=True)
@@ -188,7 +191,7 @@ def main():
                 raise ValueError("Prepared source tree differs from the metadata job")
             print(f"Prepared source tree: {tree}")
         elif args.command == "metadata":
-            result = metadata(args.repo, args.ref, args.base, args.head, args.pr_number)
+            result = metadata(args.repo, args.ref, args.base, args.head, args.pr_number, args.before)
             write_json(args.output, result)
             if "GITHUB_OUTPUT" in os.environ:
                 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

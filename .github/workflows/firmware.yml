@@ -1,4 +1,4 @@
-name: Shared firmware validation
+name: Shared project validation
 
 on:
   workflow_call:
@@ -9,6 +9,9 @@ on:
       source-ref:
         type: string
         required: true
+      before-sha:
+        type: string
+        default: ''
       base-sha:
         type: string
         default: ''
@@ -65,12 +68,14 @@ jobs:
           BASE_SHA: ${{ inputs.base-sha }}
           HEAD_SHA: ${{ inputs.head-sha }}
           PR_NUMBER: ${{ inputs.pr-number }}
+          BEFORE_SHA: ${{ inputs.before-sha }}
         run: |
           args=()
           if [[ -n "$BASE_SHA" ]]; then
             args+=(--base "$BASE_SHA" --head "$HEAD_SHA" --pr-number "$PR_NUMBER")
           fi
           python3 meshlight/scripts/ci.py metadata --ref "$SOURCE_REF" "${args[@]}" \
+            --before "$BEFORE_SHA" \
             --output meshlight/build/ci-metadata.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -227,14 +232,282 @@ jobs:
             meshlight/build/twister/**/*.log
           retention-days: 30
 
+  android-plan:
+    name: Select Android build or reuse
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - name: Select Android validation mode
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 meshlight/scripts/android_ci.py plan --metadata meshlight/build/ci-metadata.json --output meshlight/build/android-apks
+      - name: Stage reused Android APKs
+        if: ${{ steps.plan.outputs.mode == 'reuse' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-reused
+          path: meshlight/build/android-apks/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
+  android-host:
+    name: Android builds, JVM tests, screenshots and lint
+    needs: [metadata, android-plan]
+    if: ${{ needs.android-plan.outputs.mode == 'build' }}
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: '15859902'
+          packages: platform-tools
+      - name: Install pinned Android SDK packages
+        shell: pwsh
+        run: |
+          sdkmanager.bat 'platforms;android-37.0' 'build-tools;36.0.0' 'platform-tools'
+          exit $LASTEXITCODE
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Run every host check and build APKs
+        working-directory: meshlight/android-app
+        shell: pwsh
+        run: |
+          .\gradlew.bat :app:testDebugUnitTest :app:jacocoDebugReport :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest :app:lintDebug :app:validateDebugScreenshotTest --no-configuration-cache --continue --console=plain 2>&1 | Tee-Object -FilePath ..\build\android-host.log
+          exit $LASTEXITCODE
+      - name: Validate reports and stage APKs
+        run: python meshlight/scripts/android_ci.py stage-host --app meshlight/android-app --output meshlight/build/android-host
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-host
+          path: meshlight/build/android-host/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+      - name: Upload Android host reports and diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-host-results
+          path: |
+            meshlight/build/android-host.log
+            meshlight/android-app/app/build/reports/
+            meshlight/android-app/app/build/test-results/
+            meshlight/android-app/app/build/outputs/screenshotTest-results/
+          overwrite: true
+          retention-days: 30
+
+  android-device:
+    name: Android API 37 instrumentation
+    needs: [metadata, android-plan]
+    if: ${{ needs.android-plan.outputs.mode == 'build' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: '15859902'
+          packages: platform-tools
+      - name: Install pinned Android SDK packages
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'platform-tools'
+      - name: Keep pinned command-line tools selected by the emulator action
+        # The emulator action prepends cmdline-tools/latest to PATH. The runner's
+        # preinstalled tools cannot parse Android 37.0 AVD targets correctly.
+        run: |
+          pinned_tools="$ANDROID_HOME/cmdline-tools/15859902"
+          test -x "$pinned_tools/bin/avdmanager"
+          if [[ -e "$ANDROID_HOME/cmdline-tools/latest" ]]; then
+            mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/runner-preinstalled"
+          fi
+          ln -s "$pinned_tools" "$ANDROID_HOME/cmdline-tools/latest"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Build instrumentation APKs before starting the emulator
+        working-directory: meshlight/android-app
+        run: |
+          bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest \
+            --no-configuration-cache --max-workers=2 --console=plain \
+            2>&1 | tee ../build/android-device-build.log
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Execute instrumentation tests
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: '37.0'
+          target: google_apis
+          arch: x86_64
+          avd-name: meshlight-api37
+          ram-size: 2048M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -camera-back none
+          working-directory: meshlight/android-app
+          pre-emulator-launch-script: python3 ../scripts/android_ci.py verify-avd --name meshlight-api37 --output ../build/android-avd.json
+          script: python3 ../scripts/android_ci.py run-device --app . --output ../build
+      - name: Validate instrumentation reports
+        run: python3 meshlight/scripts/android_ci.py stage-device --app meshlight/android-app --output meshlight/build/android-device.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-device
+          path: meshlight/build/android-device.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+      - name: Upload Android emulator reports and diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-device-results
+          path: |
+            meshlight/build/android-device.log
+            meshlight/build/android-device-build.log
+            meshlight/build/android-logcat.log
+            meshlight/build/android-avd.json
+            meshlight/android-app/app/build/reports/androidTests/
+            meshlight/android-app/app/build/outputs/androidTest-results/
+          overwrite: true
+          retention-days: 30
+
+  android-artifacts:
+    name: Validate and upload Android APKs
+    if: ${{ always() && needs.metadata.result == 'success' && needs.android-plan.result == 'success' && (needs.android-plan.outputs.mode == 'reuse' || (needs.android-plan.outputs.mode == 'build' && needs.android-host.result == 'success' && needs.android-device.result == 'success')) }}
+    needs: [metadata, android-plan, android-host, android-device]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: build-metadata
+          path: meshlight/build
+      - name: Prepare and verify exact source tree
+        env:
+          BASE_SHA: ${{ inputs.base-sha }}
+          HEAD_SHA: ${{ inputs.head-sha }}
+        run: |
+          args=()
+          if [[ -n "$BASE_SHA" ]]; then args+=(--base "$BASE_SHA" --head "$HEAD_SHA"); fi
+          python3 meshlight/scripts/ci.py prepare "${args[@]}" --expected meshlight/build/ci-metadata.json
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: ${{ needs.android-plan.outputs.mode == 'build' }}
+        with:
+          name: android-host
+          path: meshlight/build/android-host
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: ${{ needs.android-plan.outputs.mode == 'build' }}
+        with:
+          name: android-device
+          path: meshlight/build
+      - name: Package validated Android APKs
+        if: ${{ needs.android-plan.outputs.mode == 'build' }}
+        run: python3 meshlight/scripts/android_ci.py package --metadata meshlight/build/ci-metadata.json --host meshlight/build/android-host --device meshlight/build/android-device.json --output meshlight/build/android-apks
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        if: ${{ needs.android-plan.outputs.mode == 'reuse' }}
+        with:
+          name: android-reused
+          path: meshlight/build/android-apks
+      - name: Verify Android APKs and provenance
+        run: python3 meshlight/scripts/android_ci.py verify --metadata meshlight/build/ci-metadata.json --output meshlight/build/android-apks
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-apks
+          path: meshlight/build/android-apks/*
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 30
+
   complete:
-    name: All firmware checks
+    name: All project checks
     if: ${{ always() }}
-    needs: [metadata, build, tests]
+    needs: [metadata, build, tests, android-plan, android-host, android-device, android-artifacts]
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          path: meshlight
+          ref: ${{ inputs.source-sha }}
+          persist-credentials: false
       - name: Require every validation job
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          python3 -c 'import json, os, sys; jobs=json.loads(os.environ["RESULTS"]); print(jobs); sys.exit(0 if all(j["result"] == "success" for j in jobs.values()) else 1)'
+          IS_PR: ${{ inputs.pr-number != '' }}
+        run: python3 meshlight/scripts/android_ci.py complete

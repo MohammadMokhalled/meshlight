@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   validate:
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/firmware.yml
     with:
       source-sha: ${{ github.sha }}
@@ -24,7 +27,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-24.04
     steps:
-      - name: Require all product builds and tests
+      - name: Require all firmware and applicable Android checks
         env:
           RESULT: ${{ needs.validate.result }}
         run: test "$RESULT" = success
