@@ -29,13 +29,30 @@ class BackupWorkflowTest {
         val context=RuntimeEnvironment.getApplication()
         val seed=DemoMeshGateway().installation().copy(networkId=FixtureNetworkId)
         val base=DemoMeshGateway()
+        val mergeStarted=CompletableDeferred<Unit>()
+        val releaseMerge=CountDownLatch(1)
+        val holdImportedMerge=AtomicBoolean(false)
+        val snapshot=base.network.value!!
+        val nodes=object : AbstractList<GatewayNode>() {
+            override val size: Int get() {
+                if (holdImportedMerge.compareAndSet(true,false)) {
+                    mergeStarted.complete(Unit)
+                    check(releaseMerge.await(10,TimeUnit.SECONDS)) {"Network merge gate timed out"}
+                }
+                return snapshot.nodes.size
+            }
+            override fun get(index: Int)=snapshot.nodes[index]
+        }
         val radio=object : MeshGateway by base {
-            override val network=MutableStateFlow<GatewayNetwork?>(base.network.value!!.copy(id=FixtureNetworkId))
+            override val network=MutableStateFlow<GatewayNetwork?>(snapshot.copy(id=FixtureNetworkId,nodes=nodes))
             override val connection=MutableStateFlow(ConnectionStatus.DISCONNECTED)
             override fun setForeground(active: Boolean)=Unit
             override fun setSessionEnabled(enabled: Boolean)=Unit
             override suspend fun networks()=emptyList<NetworkChoice>()
-            override suspend fun importCdb(json: String) {CdbValidator.validate(json)}
+            override suspend fun importCdb(json: String) {
+                CdbValidator.validate(json)
+                holdImportedMerge.set(true)
+            }
             override suspend fun disconnect()=Unit
         }
         val started=CompletableDeferred<Unit>()
@@ -67,6 +84,10 @@ class BackupWorkflowTest {
                 val completed=withTimeoutOrNull(1000) {importing.join(); true} ?: false
                 assertFalse("Import must wait for the older autosave before replacing metadata",completed)
             } finally {release.countDown()}
+            try {
+                withTimeout(5000) {mergeStarted.await()}
+                assertTrue("The home must remain loading until its SDK nodes have been merged",repository.state.value.loading)
+            } finally {releaseMerge.countDown()}
             withTimeout(5000) {importing.join()}
             val restored=withTimeout(5000) {repository.state.first {!it.loading&&!it.readOnly}}
             assertEquals(seed.nodes.size,restored.installation!!.nodes.size)
@@ -74,6 +95,7 @@ class BackupWorkflowTest {
             assertTrue("An older autosave must not overwrite imported metadata",store.read(FixtureNetworkId)!!.nodes.all {it.aggregate==null&&it.leds.isEmpty()})
         } finally {
             release.countDown()
+            releaseMerge.countDown()
             scope.coroutineContext[Job]!!.cancelAndJoin()
             database.close()
             file.delete()

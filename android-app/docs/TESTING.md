@@ -50,6 +50,9 @@ holds a real autosave inside serialization while starting an import. It checks
 that import waits, then verifies both the active state and SQLite retain the
 imported metadata. This regression failed before the fix and passed afterward;
 the existing encrypted transfer/rejection/restore assertions remain enabled.
+The test also pauses the SDK node merge during rebind and requires `loading`
+to stay true. Readiness is published only after nodes, rooms, and listeners are
+bound, so observers cannot mistake an intermediate empty home for a loaded one.
 The complete JVM suite, 132 screenshot comparisons, APK builds, coverage, lint,
 and four instrumentation tests on a fresh API 37 emulator passed after this fix.
 

@@ -110,7 +110,7 @@ class LightingRepository @Inject constructor(
             else if (id.isNotBlank() && snapshot != null) saved ?: Installation(networkId = snapshot.id, name = snapshot.name)
             else null
         mutableState.value = ControllerState(installation, gateway.connection.value, demo = demoMode, readOnly = readOnly,
-            networks = if (demoMode) emptyList() else real.networks())
+            networks = if (demoMode) emptyList() else real.networks(), loading = true)
         if (installation != null && snapshot != null) synchronize(snapshot)
         gateway.setForeground(foreground)
         gateway.setSessionEnabled(installation != null && !readOnly)
@@ -145,6 +145,8 @@ class LightingRepository @Inject constructor(
                 }
             }
         }
+        // Publish readiness only after SDK nodes, rooms, and listeners are bound.
+        mutableState.update { it.copy(loading = false) }
     }
 
     private fun synchronize(snapshot: GatewayNetwork) {
