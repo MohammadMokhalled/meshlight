@@ -7,6 +7,13 @@
 #include <psa/crypto.h>
 #include <zephyr/drivers/hwinfo.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
+
+#if defined(CONFIG_BT_MESH_PB_GATT)
+/* At the minimum ATT MTU, each notification carries 19 provisioning bytes. */
+BUILD_ASSERT(CONFIG_BT_ATT_TX_COUNT >= 4,
+	     "PB-GATT Public Key transmission requires at least four ATT TX buffers");
+#endif
 
 LOG_MODULE_REGISTER(mesh_provisioning);
 static uint8_t uuid[16];
