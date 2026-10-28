@@ -119,20 +119,26 @@ jobs:
         env:
           PRODUCT: ${{ matrix.id }}
           BOARD: ${{ matrix.board }}
+          SYSBUILD: ${{ matrix.sysbuild }}
         run: |
           version=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["version"])')
           source_sha=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["source_commit"])')
-          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT" meshlight/firmware -- \
+          build_mode=--no-sysbuild
+          if [[ "$SYSBUILD" == true ]]; then build_mode=--sysbuild; fi
+          west build "$build_mode" -b "$BOARD" -d "meshlight/build/$PRODUCT" meshlight/firmware -- \
             "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
             2>&1 | tee "meshlight/build/$PRODUCT.log"
       - name: Build developer shell configuration
         env:
           PRODUCT: ${{ matrix.id }}
           BOARD: ${{ matrix.board }}
+          SYSBUILD: ${{ matrix.sysbuild }}
         run: |
           version=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["version"])')
           source_sha=$(python3 -c 'import json; print(json.load(open("meshlight/build/ci-metadata.json"))["source_commit"])')
-          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT-dev" meshlight/firmware -- \
+          build_mode=--no-sysbuild
+          if [[ "$SYSBUILD" == true ]]; then build_mode=--sysbuild; fi
+          west build "$build_mode" -b "$BOARD" -d "meshlight/build/$PRODUCT-dev" meshlight/firmware -- \
             "-DMESHLIGHT_VERSION=$version" "-DMESHLIGHT_GIT_SHA=$source_sha" \
             -DEXTRA_CONF_FILE=dev_shell.conf 2>&1 | tee "meshlight/build/$PRODUCT-dev.log"
       - name: Package firmware
@@ -147,9 +153,13 @@ jobs:
         env:
           PRODUCT: ${{ matrix.id }}
           BOARD: ${{ matrix.board }}
+          SYSBUILD: ${{ matrix.sysbuild }}
+          CAPACITY_OVERLAY: ${{ matrix.capacity_overlay }}
         run: |
-          west build --no-sysbuild -b "$BOARD" -d "meshlight/build/$PRODUCT-max" meshlight/firmware -- \
-            -DEXTRA_DTC_OVERLAY_FILE=long_strip.overlay 2>&1 | tee "meshlight/build/$PRODUCT-max.log"
+          build_mode=--no-sysbuild
+          if [[ "$SYSBUILD" == true ]]; then build_mode=--sysbuild; fi
+          west build "$build_mode" -b "$BOARD" -d "meshlight/build/$PRODUCT-max" meshlight/firmware -- \
+            "-DEXTRA_DTC_OVERLAY_FILE=${CAPACITY_OVERLAY:-long_strip.overlay}" 2>&1 | tee "meshlight/build/$PRODUCT-max.log"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: meshlight-${{ matrix.id }}-${{ needs.metadata.outputs.version }}
@@ -169,6 +179,9 @@ jobs:
             meshlight/build/${{ matrix.id }}/CMakeFiles/CMakeConfigureLog.yaml
             meshlight/build/${{ matrix.id }}/zephyr/.config
             meshlight/build/${{ matrix.id }}-dev/zephyr/.config
+            meshlight/build/${{ matrix.id }}/firmware/zephyr/.config
+            meshlight/build/${{ matrix.id }}/ipc_radio/zephyr/.config
+            meshlight/build/${{ matrix.id }}-dev/firmware/zephyr/.config
             meshlight/build/dependencies.json
           retention-days: 30
 

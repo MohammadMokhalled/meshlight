@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: MIT
+/* The nRF52832's 64 KiB RAM budget supports a smaller capacity build. */
+&lighting_strip { chain-length = <128>; };

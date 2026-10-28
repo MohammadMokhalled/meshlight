@@ -1,0 +1,63 @@
+// SPDX-License-Identifier: MIT
+#include <zephyr/dt-bindings/led/led.h>
+#include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,code-partition = &app_partition;
+	};
+	aliases {
+		led-strip = &lighting_strip;
+	};
+};
+
+/* Standalone application core image; retain the SDK's 32 KiB Settings area. */
+/delete-node/ &boot_partition;
+/delete-node/ &slot0_partition;
+/delete-node/ &slot1_partition;
+&flash0 {
+	partitions {
+		app_partition: partition@0 {
+			label = "image-0";
+			reg = <0 0xf8000>;
+		};
+	};
+};
+
+&pinctrl {
+	lighting_spi_default: lighting_spi_default {
+		group1 {
+			/* Arduino D11 is DIN; leave D13 unconnected. */
+			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+		};
+	};
+	lighting_spi_sleep: lighting_spi_sleep {
+		group1 {
+			psels = <NRF_PSEL(SPIM_SCK, 1, 15)>,
+				<NRF_PSEL(SPIM_MOSI, 1, 13)>;
+			low-power-enable;
+		};
+	};
+};
+
+&spi4 {
+	status = "okay";
+	/delete-property/ cs-gpios;
+	pinctrl-0 = <&lighting_spi_default>;
+	pinctrl-1 = <&lighting_spi_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	lighting_strip: ws2812@0 {
+		compatible = "worldsemi,ws2812-spi";
+		reg = <0>;
+		chain-length = <6>;
+		color-mapping = <LED_COLOR_ID_GREEN LED_COLOR_ID_RED LED_COLOR_ID_BLUE>;
+		/* Five 250 ns SPI bits give an 800 kbit/s WS2812 symbol. */
+		spi-max-frequency = <4000000>;
+		bits-per-symbol = <5>;
+		spi-zero-frame = <0x18>;
+		spi-one-frame = <0x1c>;
+		reset-delay = <300>;
+	};
+};

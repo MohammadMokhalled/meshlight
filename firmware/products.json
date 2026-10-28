@@ -1,4 +1,6 @@
 [
   {"id": "nrf54l15dk", "board": "nrf54l15dk/nrf54l15/cpuapp"},
+  {"id": "nrf52dk", "board": "nrf52dk/nrf52832", "capacity_overlay": "nrf52_long_strip.overlay"},
+  {"id": "nrf5340dk", "board": "nrf5340dk/nrf5340/cpuapp", "sysbuild": true},
   {"id": "nucleo_wb55rg", "board": "nucleo_wb55rg"}
 ]

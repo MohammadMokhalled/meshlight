@@ -48,7 +48,11 @@ Keep release history intact: do not move final tags or force-push publication br
 
 The [product inventory](../firmware/products.json) is shared by both pipelines.
 Add a unique lowercase `id` and a Zephyr `board` target to add a product to both
-pipelines. Add any required board overlay/configuration and pinned west
+pipelines. Set the optional boolean `sysbuild` to `true` for a dual-core product
+(currently nRF5340-DK); omitted means a single-image build. The optional
+`capacity_overlay` selects a smaller capacity check for RAM-constrained boards:
+nRF52-DK checks 128 LEDs, while other products use `long_strip.overlay` (339).
+Add any required board overlay/configuration and pinned west
 dependencies in the same change.
 No workflow matrix changes are needed.
 
@@ -88,15 +92,21 @@ cancelled when a newer commit arrives. Malformed release names and final tags
 fail version validation rather than silently publishing a different version.
 
 Both entry workflows call the same build/test workflow. Every product builds
-with `west build --no-sysbuild` in the pinned Nordic Linux toolchain container.
-Twister executes all discovered test scenarios on `qemu_cortex_m3`. Report
-validation rejects missing scenarios,
+with `west build --no-sysbuild`, except nRF5340-DK, which uses `--sysbuild` to
+build both application and Bluetooth network cores in the pinned Nordic Linux
+toolchain container.
+Twister executes all discovered test scenarios on `qemu_cortex_m3`.
+Report validation rejects missing scenarios,
 skips, failures, and missing individual test cases. This verifies emulator
 behavior; physical strip validation remains in [testing](testing.md).
 
 Each firmware artifact contains `meshlight-<product>-<version>.zip`, with:
 
 - Versioned HEX, BIN, and ELF files.
+- nRF5340 packages additionally contain `-cpunet.hex`, `-cpunet.bin`, and
+  `-cpunet.elf` for the Bluetooth network core; install both cores. The files
+  without that suffix are for the application core. From a source build,
+  `west flash -d build/nrf5340dk` programs both using the sysbuild domain list.
 - `LICENSE`: the project's MIT license and copyright notice.
 - `build-metadata.json`: version, product, source/tree identity, PR parents when
   applicable, SDK/toolchain identity, dependency revisions, and CI run/attempt.

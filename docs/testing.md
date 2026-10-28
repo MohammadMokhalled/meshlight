@@ -15,9 +15,9 @@ physical LEDs. QEMU is the firmware test platform used by CI.
 | lighting persistence and shell | 10 boot conditions | 19 | 190 |
 | Settings storage integration | NVS and ZMS with simulated flash, including legacy CRC rejection and reset retries | 11 | 22 |
 | Mesh engine and opcode adapters | 1, 6, 17, 300 and 339 LEDs | 20 | 100 |
-| Mesh crypto resources | Real PSA imports and encrypted Settings with simulated flash | 2 | 2 |
+| Mesh crypto resources | Real PSA imports, provisioning ECDH and encrypted Settings with 8 KiB / 4 KiB heaps | 2 | 4 |
 | Lighting reset quiescence | Save already in flight | 1 | 1 |
-| **Firmware total** | **24 scenarios** | | **400** |
+| **Firmware total** | **25 scenarios** | | **402** |
 
 Manual-mode tests cover initialization and retry, per-LED and uniform updates,
 requested-state copies, invalid arguments, power restoration, gamma reference
@@ -80,7 +80,8 @@ acknowledged/unacknowledged handling and configured publications without a
 Bluetooth controller. Fake strip devices cover 1/6/17/300/339 LEDs. Storage
 integration runs against both real Settings backends with simulated flash and
 injected deletion failures. These tests are discovered by the existing CI
-Twister job; each board also builds the maximum-length overlay in CI.
+Twister job; each board also builds a capacity overlay in CI (128 LEDs on
+nRF52-DK, 339 on the other boards).
 
 Phone commissioning and physical radio checks remain a separate
 [hardware acceptance checklist](mesh.md#hardware-acceptance-checklist).
@@ -118,7 +119,9 @@ python "$ZEPHYR_BASE/scripts/twister" \
   --build-only --inline-logs --outdir build/twister-dk-build
 ```
 
-The Nucleo test platform name is `nucleo_wb55rg/stm32wb55xx`. It also needs the
+The other compile-only targets are `nrf52dk/nrf52832`,
+`nrf5340dk/nrf5340/cpuapp`, and `nucleo_wb55rg/stm32wb55xx`.
+The Nucleo also needs the
 STM32 HAL dependency described in [setup](setup.md). The automatic-refresh suite
 allows only QEMU and native_sim. Compile-only tests still use a fake strip and
 do not verify SPI or physical output.

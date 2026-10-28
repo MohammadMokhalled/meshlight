@@ -5,6 +5,11 @@ mainmenu "Meshlight configuration"
 
 source "Kconfig.zephyr"
 
+# Keep the optional command shell within the nRF52832's 64 KiB RAM budget.
+config SHELL_MINIMAL
+	default y if BOARD_NRF52DK_NRF52832
+	depends on SHELL
+
 menuconfig MESHLIGHT_MESH
 	bool "Bluetooth Mesh lighting control"
 	default n
