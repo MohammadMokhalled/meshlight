@@ -1,3 +1,5 @@
+> **This app is build completely by AI and vibe coding since the main goal of the project was to build a proper firmware and android app is built for testing**
+
 # MeshLight for Android
 
 A local Bluetooth Mesh controller for the firmware in `../firmware`. The app uses Kotlin, Jetpack Compose Material 3, Navigation 3, Hilt, Room, DataStore, and the unmodified Nordic Android Mesh library.
