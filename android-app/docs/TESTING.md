@@ -20,7 +20,7 @@ The emulator smoke check covered cold startup, explicit demo entry, light detail
 
 ## Test layers
 
-CI integration was checked locally on 28 October 2026: 60 JVM/Robolectric
+CI integration was checked locally on 28 October 2026: 61 JVM/Robolectric
 cases, 132 screenshot comparisons, and four API 37 emulator instrumentation
 tests passed. Debug, unsigned release, instrumentation APK builds, coverage,
 and lint also passed (lint warnings remain). The first instrumentation attempt
@@ -36,6 +36,22 @@ after pushing the workflow changes.
 | Compose screenshots | Twelve screens at nine window sizes, dark appearance and 1.5× font scale; 132 comparisons | `app/src/screenshotTest/kotlin/` and `app/src/screenshotTestDebug/reference/` |
 | Android instrumentation | Real Hilt activity startup, demo control and activity recreation, SQLite persistence and snapshots larger than 2 MiB | `app/src/androidTest/java/com/example/meshlightcontroller/` |
 | Physical firmware acceptance | Provisioning, proxy bearers, actual status packets, group subscriptions, interrupted configuration, radio loss and multi-phone transfer | Hardware checklist in [README](../README.md#hardware-acceptance-before-release) |
+
+### Backup restore persistence regression
+
+An import must wait for an older save already in flight, and queued autosave
+snapshots must not overwrite the imported home. Repository persistence now
+serializes autosaves, explicit saves, and metadata replacement. Import publishes
+the replacement state before re-enabling control, and updates ownership and
+network selection in one preferences edit. Rebinding is serialized with restore.
+
+`BackupWorkflowTest.importWaitsForInFlightAutosaveAndKeepsRestoredMetadata`
+holds a real autosave inside serialization while starting an import. It checks
+that import waits, then verifies both the active state and SQLite retain the
+imported metadata. This regression failed before the fix and passed afterward;
+the existing encrypted transfer/rejection/restore assertions remain enabled.
+The complete JVM suite, 132 screenshot comparisons, APK builds, coverage, lint,
+and four instrumentation tests on a fresh API 37 emulator passed after this fix.
 
 ### Provisioning address regression
 

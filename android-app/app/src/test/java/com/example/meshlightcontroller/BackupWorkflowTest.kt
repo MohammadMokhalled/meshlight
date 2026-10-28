@@ -7,6 +7,8 @@ import com.example.meshlightcontroller.core.mesh.*
 import com.example.meshlightcontroller.core.model.*
 import com.example.meshlightcontroller.data.*
 import com.google.gson.Gson
+import com.google.gson.GsonBuilder
+import com.google.gson.JsonSerializer
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import org.junit.Assert.*
@@ -16,10 +18,68 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk=[28],application=Application::class)
 class BackupWorkflowTest {
+    @Test fun importWaitsForInFlightAutosaveAndKeepsRestoredMetadata() = runBlocking {
+        val context=RuntimeEnvironment.getApplication()
+        val seed=DemoMeshGateway().installation().copy(networkId=FixtureNetworkId)
+        val base=DemoMeshGateway()
+        val radio=object : MeshGateway by base {
+            override val network=MutableStateFlow<GatewayNetwork?>(base.network.value!!.copy(id=FixtureNetworkId))
+            override val connection=MutableStateFlow(ConnectionStatus.DISCONNECTED)
+            override fun setForeground(active: Boolean)=Unit
+            override fun setSessionEnabled(enabled: Boolean)=Unit
+            override suspend fun networks()=emptyList<NetworkChoice>()
+            override suspend fun importCdb(json: String) {CdbValidator.validate(json)}
+            override suspend fun disconnect()=Unit
+        }
+        val started=CompletableDeferred<Unit>()
+        val release=CountDownLatch(1)
+        val blockNextSave=AtomicBoolean(false)
+        val plain=Gson()
+        val gson=GsonBuilder().registerTypeAdapter(Installation::class.java,
+            JsonSerializer<Installation> { value,_,_ ->
+                if (blockNextSave.compareAndSet(true,false)) {
+                    started.complete(Unit)
+                    check(release.await(10,TimeUnit.SECONDS)) {"Autosave gate timed out"}
+                }
+                plain.toJsonTree(value)
+            }).create()
+        val database=Room.inMemoryDatabaseBuilder(context,AppDatabase::class.java).build()
+        val store=InstallationStore(database,gson)
+        store.write(seed)
+        val preferences=AppPreferences(context)
+        preferences.session(false,FixtureNetworkId)
+        preferences.transfer(FixtureNetworkId,true)
+        val scope=CoroutineScope(SupervisorJob()+Dispatchers.Unconfined)
+        val file=File(context.cacheDir,"autosave-race.json").apply {writeText(fixtureCdb())}
+        blockNextSave.set(true)
+        val repository=LightingRepository(radio,DemoMeshGateway(),store,preferences,scope)
+        try {
+            withTimeout(5000) {started.await()}
+            val importing=BackupService(context,repository,Gson()).import(Uri.fromFile(file),charArrayOf())
+            try {
+                val completed=withTimeoutOrNull(1000) {importing.join(); true} ?: false
+                assertFalse("Import must wait for the older autosave before replacing metadata",completed)
+            } finally {release.countDown()}
+            withTimeout(5000) {importing.join()}
+            val restored=withTimeout(5000) {repository.state.first {!it.loading&&!it.readOnly}}
+            assertEquals(seed.nodes.size,restored.installation!!.nodes.size)
+            assertTrue("Plain CDB import must not retain old observations",restored.installation!!.nodes.all {it.aggregate==null&&it.leds.isEmpty()})
+            assertTrue("An older autosave must not overwrite imported metadata",store.read(FixtureNetworkId)!!.nodes.all {it.aggregate==null&&it.leds.isEmpty()})
+        } finally {
+            release.countDown()
+            scope.coroutineContext[Job]!!.cancelAndJoin()
+            database.close()
+            file.delete()
+        }
+    }
+
     @Test fun transferWritesEncryptedFileBeforeDisablingControlAndRestoreNeverOverwritesLiveNetwork() = runBlocking {
         val context=RuntimeEnvironment.getApplication()
         val seed=DemoMeshGateway().installation().copy(networkId=FixtureNetworkId)
@@ -66,6 +126,6 @@ class BackupWorkflowTest {
             withTimeout(5000) {repository.state.first {!it.readOnly&&it.installation?.networkId==FixtureNetworkId}}
             assertTrue(repository.state.value.installation!!.nodes.all {it.aggregate?.receivedAt==0L&&it.drafts.isEmpty()})
             assertEquals(seed.zones,repository.state.value.installation!!.zones)
-        } finally {scope.cancel();database.close();file.delete()}
+        } finally {scope.coroutineContext[Job]!!.cancelAndJoin();database.close();file.delete()}
     }
 }

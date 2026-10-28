@@ -6,6 +6,8 @@ import com.example.meshlightcontroller.core.model.*
 import com.example.meshlightcontroller.di.ApplicationScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.Locale
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,7 +32,8 @@ class LightingRepository @Inject constructor(
     private var operationJob: Job? = null
     private var operationGeneration = 0L
     private var foreground = false
-    private var binding = false
+    private val bindingMutex = Mutex()
+    private val persistenceMutex = Mutex()
     private val reconnectEdits = linkedMapOf<EditKey, ScheduledEdit>()
 
     internal val scheduler = EditScheduler(scope, { edit ->
@@ -76,71 +79,72 @@ class LightingRepository @Inject constructor(
         }
         scope.launch {
             state.map { it.installation }.filterNotNull().distinctUntilChanged().debounce(800).collect { value ->
-                try { store.write(value) }
+                try {
+                    persistenceMutex.withLock {
+                        // A queued snapshot must not overwrite a newer imported home.
+                        if (state.value.installation == value) store.write(value)
+                    }
+                }
                 catch (cancel: CancellationException) { throw cancel }
                 catch (error: Exception) { message(IllegalStateException("Unable to save this home on the phone", error)) }
             }
         }
     }
 
-    private suspend fun bind(demoMode: Boolean, id: String, readOnly: Boolean) {
-        if (binding) return
-        binding = true
+    private suspend fun bind(demoMode: Boolean, id: String, readOnly: Boolean) = bindingMutex.withLock {
         mutableState.update { it.copy(loading = true, connection = ConnectionStatus.IDLE) }
-        try {
-            listeners.forEach(Job::cancel)
-            listeners.clear()
-            cancelScheduledEdits()
-            backgroundRead?.cancel()
-            visibleRead?.cancel()
-            gateway.setSessionEnabled(false)
-            gateway.disconnect()
-            liveEdits.clear()
-            gateway = if (demoMode) demo else real
-            if (!demoMode && id.isNotBlank()) real.selectNetwork(id)
-            val saved = if (id.isNotBlank()) store.read(id) else null
-            if (demoMode && saved != null) demo.restore(saved)
-            val snapshot = gateway.network.value
-            val installation = if (demoMode) saved ?: demo.installation()
-                else if (id.isNotBlank() && snapshot != null) saved ?: Installation(networkId = snapshot.id, name = snapshot.name)
-                else null
-            mutableState.value = ControllerState(installation, gateway.connection.value, demo = demoMode, readOnly = readOnly,
-                networks = if (demoMode) emptyList() else real.networks())
-            if (installation != null && snapshot != null) synchronize(snapshot)
-            gateway.setForeground(foreground)
-            gateway.setSessionEnabled(installation != null && !readOnly)
-            listeners += scope.launch {
-                gateway.network.filterNotNull().collect { if (state.value.installation?.networkId == it.id) synchronize(it) }
-            }
-            listeners += scope.launch {
-                gateway.nearby.collect { values -> mutableState.update { it.copy(nearby = values) } }
-            }
-            listeners += scope.launch {
-                gateway.connection.collect { connection ->
-                    mutableState.update { it.copy(connection = connection) }
-                    if (connection != ConnectionStatus.CONNECTED) {
-                        if (foreground && !state.value.readOnly && connection in setOf(ConnectionStatus.DISCONNECTED, ConnectionStatus.CONNECTING, ConnectionStatus.SCANNING)) {
-                            scheduler.interrupt().forEach(::retainEdit)
-                        } else cancelScheduledEdits()
-                        liveEdits.clear()
-                        mutableState.update { it.copy(pendingTargets = emptySet()) }
-                    } else {
-                        resumeEdits()
-                        if (state.value.operation?.running != true && state.value.pendingTargets.isEmpty()) refreshBackground()
-                    }
+        listeners.forEach(Job::cancel)
+        listeners.clear()
+        cancelScheduledEdits()
+        backgroundRead?.cancel()
+        visibleRead?.cancel()
+        gateway.setSessionEnabled(false)
+        gateway.disconnect()
+        liveEdits.clear()
+        gateway = if (demoMode) demo else real
+        if (!demoMode && id.isNotBlank()) real.selectNetwork(id)
+        val saved = if (id.isNotBlank()) store.read(id) else null
+        if (demoMode && saved != null) demo.restore(saved)
+        val snapshot = gateway.network.value
+        val installation = if (demoMode) saved ?: demo.installation()
+            else if (id.isNotBlank() && snapshot != null) saved ?: Installation(networkId = snapshot.id, name = snapshot.name)
+            else null
+        mutableState.value = ControllerState(installation, gateway.connection.value, demo = demoMode, readOnly = readOnly,
+            networks = if (demoMode) emptyList() else real.networks())
+        if (installation != null && snapshot != null) synchronize(snapshot)
+        gateway.setForeground(foreground)
+        gateway.setSessionEnabled(installation != null && !readOnly)
+        listeners += scope.launch {
+            gateway.network.filterNotNull().collect { if (state.value.installation?.networkId == it.id) synchronize(it) }
+        }
+        listeners += scope.launch {
+            gateway.nearby.collect { values -> mutableState.update { it.copy(nearby = values) } }
+        }
+        listeners += scope.launch {
+            gateway.connection.collect { connection ->
+                mutableState.update { it.copy(connection = connection) }
+                if (connection != ConnectionStatus.CONNECTED) {
+                    if (foreground && !state.value.readOnly && connection in setOf(ConnectionStatus.DISCONNECTED, ConnectionStatus.CONNECTING, ConnectionStatus.SCANNING)) {
+                        scheduler.interrupt().forEach(::retainEdit)
+                    } else cancelScheduledEdits()
+                    liveEdits.clear()
+                    mutableState.update { it.copy(pendingTargets = emptySet()) }
+                } else {
+                    resumeEdits()
+                    if (state.value.operation?.running != true && state.value.pendingTargets.isEmpty()) refreshBackground()
                 }
             }
-            listeners += scope.launch {
-                gateway.events.collect { event ->
-                    when (event) {
-                        is GatewayEvent.Report -> state.value.installation?.nodes?.firstOrNull { it.address == event.source }?.let { record(it.uuid, event.target, event.observation) }
-                        is GatewayEvent.Transition -> state.value.installation?.nodes?.firstOrNull { it.address == event.source }?.let { node -> updateNode(node.uuid) { it.copy(transition = event.value) } }
-                        is GatewayEvent.Error -> message(IllegalStateException(event.text))
-                        is GatewayEvent.Log -> mutableState.update { it.copy(diagnostics = (listOf(event.text) + it.diagnostics).take(100)) }
-                    }
+        }
+        listeners += scope.launch {
+            gateway.events.collect { event ->
+                when (event) {
+                    is GatewayEvent.Report -> state.value.installation?.nodes?.firstOrNull { it.address == event.source }?.let { record(it.uuid, event.target, event.observation) }
+                    is GatewayEvent.Transition -> state.value.installation?.nodes?.firstOrNull { it.address == event.source }?.let { node -> updateNode(node.uuid) { it.copy(transition = event.value) } }
+                    is GatewayEvent.Error -> message(IllegalStateException(event.text))
+                    is GatewayEvent.Log -> mutableState.update { it.copy(diagnostics = (listOf(event.text) + it.diagnostics).take(100)) }
                 }
             }
-        } finally { binding = false }
+        }
     }
 
     private fun synchronize(snapshot: GatewayNetwork) {
@@ -431,7 +435,19 @@ class LightingRepository @Inject constructor(
     internal fun updateNode(uuid: String, transform: (NodeInfo) -> NodeInfo) {
         updateInstallation { it.copy(nodes = it.nodes.map { node -> if (node.uuid == uuid) transform(node) else node }) }
     }
-    internal suspend fun saveNow() { state.value.installation?.let { store.write(it) } }
+    internal suspend fun saveNow() = persistenceMutex.withLock {
+        state.value.installation?.let { store.write(it) }
+    }
+
+    internal suspend fun restoreInstallation(value: Installation) = bindingMutex.withLock {
+        persistenceMutex.withLock {
+            // Finish older writes first, then invalidate pending autosave snapshots
+            // before the preferences collector can bind this network again.
+            store.write(value)
+            mutableState.update { it.copy(installation = value) }
+            preferences.activateImportedNetwork(value.networkId)
+        }
+    }
     private fun retainEdit(edit: ScheduledEdit) {
         if ((reconnectEdits[edit.key]?.revision ?: Long.MIN_VALUE) < edit.revision) reconnectEdits[edit.key] = edit
     }

@@ -132,6 +132,14 @@ configuration cache. Missing/empty reports, failed or skipped tests, and lint
 errors fail validation; lint warnings and coverage reporting retain their
 existing policy. Reference screenshots are never updated automatically.
 
+The emulator uses pinned command-line tools 22 through `cmdline-tools/latest`,
+including inside the emulator action, which prepends that directory to `PATH`.
+Older runner tools misparse API `37.0` as `android-0` and can cause SurfaceFlinger
+crash loops. CI verifies the generated AVD target and system-image path before
+boot. Instrumentation APKs compile before starting the emulator. A zero Gradle
+exit status without executed JUnit cases fails inside the emulator step, while
+logcat is still available; AVD metadata and compilation logs accompany diagnostics.
+
 For unchanged Android source, push CI searches successful push runs of `ci.yml`
 for an `android-apks` artifact whose source is an ancestor of the current commit
 and whose Android Git subtree matches exactly. Tags and new branches without

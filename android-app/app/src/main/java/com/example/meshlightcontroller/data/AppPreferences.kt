@@ -57,6 +57,16 @@ class AppPreferences @Inject constructor(@ApplicationContext private val context
             data[Keys.transferred] = if (disabled) current + networkId else current - networkId
         }
     }
+    suspend fun activateImportedNetwork(networkId: String) {
+        // Publish ownership and selection together, avoiding an intermediate bind
+        // to the previous network with the new ownership state.
+        context.meshPreferences.edit { data ->
+            data[Keys.transferred] = (data[Keys.transferred] ?: emptySet()) - networkId
+            data[Keys.demo] = false
+            data[Keys.network] = networkId
+            data[Keys.lastRealNetwork] = networkId
+        }
+    }
     suspend fun vendor(company: Int, model: Int) {
         require(company in 0..0xFFFF && model in 0..0xFFFF)
         context.meshPreferences.edit { it[Keys.company] = company; it[Keys.model] = model }

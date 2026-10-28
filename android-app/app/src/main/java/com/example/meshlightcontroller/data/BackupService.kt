@@ -95,9 +95,7 @@ class BackupService @Inject constructor(
                         leds = it.leds.mapValues { led -> led.value.copy(receivedAt = 0) },
                         drafts = emptyMap(), lastError = null, transition = null) })
                     ?: Installation(networkId = network.id, name = network.name)
-                store.write(metadata)
-                preferences.transfer(network.id, false)
-                preferences.session(false, network.id)
+                restoreInstallation(metadata)
                 advance()
             } finally { decoded.fill(0) }
         } finally { password.fill('\u0000') }

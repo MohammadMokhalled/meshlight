@@ -133,6 +133,23 @@ def stage_device(app, output):
                         "toolchain": dict(toolchain(app), emulator={"api": "37.0", "target": "google_apis", "arch": "x86_64"})})
 
 
+def verify_avd(directory, name, output):
+    """Reject old avdmanager's silent android-0 target before booting the image."""
+    directory = Path(directory)
+    def properties(path):
+        return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines()
+                    if "=" in line and not line.lstrip().startswith("#"))
+    identity = properties(directory / f"{name}.ini")
+    config = properties(directory / f"{name}.avd/config.ini")
+    details = {"target": identity.get("target"), "image": config.get("image.sysdir.1"),
+               "command_line_tools": str(Path(os.environ["ANDROID_HOME"]) / "cmdline-tools/latest")}
+    write_json(output, details)
+    if details["target"] != "android-37.0" or (
+            details["image"] or "").replace("\\", "/").rstrip("/") != "system-images/android-37.0/google_apis/x86_64":
+        raise ValueError(f"Incorrect Android AVD metadata; check command-line tools selection: {details}")
+    return details
+
+
 def run_device(app, output):
     app, output = Path(app).resolve(), Path(output).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -142,6 +159,9 @@ def run_device(app, output):
             subprocess.run(["bash", "./gradlew", ":app:connectedDebugAndroidTest",
                             "--no-configuration-cache", "--console=plain"], cwd=app,
                            stdout=log, stderr=subprocess.STDOUT, check=True)
+        # Some AGP device setup failures still return exit code zero. Validate
+        # actual execution while the emulator is alive so diagnostics survive.
+        junit(app / "app/build/outputs/androidTest-results/connected/debug")
     finally:
         with (output / "android-logcat.log").open("w", encoding="utf-8") as log:
             subprocess.run(["adb", "logcat", "-d"], stdout=log, stderr=subprocess.STDOUT, check=False)
@@ -325,6 +345,9 @@ def main():
         command = commands.add_parser(name)
         command.add_argument("--app", type=Path, required=True)
         command.add_argument("--output", type=Path, required=True)
+    avd = commands.add_parser("verify-avd")
+    avd.add_argument("--name", required=True)
+    avd.add_argument("--output", type=Path, required=True)
     commands.add_parser("complete")
     args = parser.parse_args()
     try:
@@ -346,6 +369,8 @@ def main():
             stage_device(args.app, args.output)
         elif args.command == "run-device":
             run_device(args.app, args.output)
+        elif args.command == "verify-avd":
+            verify_avd(os.environ["ANDROID_AVD_HOME"], args.name, args.output)
         elif args.command == "package":
             package(info, args.host, args.device, args.output)
         elif args.command == "verify":

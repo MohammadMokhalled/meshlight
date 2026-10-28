@@ -303,7 +303,6 @@ jobs:
           exit $LASTEXITCODE
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
-          build-root-directory: meshlight/android-app
           cache-read-only: ${{ github.event_name == 'pull_request' }}
       - name: Run every host check and build APKs
         working-directory: meshlight/android-app
@@ -368,10 +367,26 @@ jobs:
           packages: platform-tools
       - name: Install pinned Android SDK packages
         run: sdkmanager 'platforms;android-37.0' 'build-tools;36.0.0' 'platform-tools'
+      - name: Keep pinned command-line tools selected by the emulator action
+        # The emulator action prepends cmdline-tools/latest to PATH. The runner's
+        # preinstalled tools cannot parse Android 37.0 AVD targets correctly.
+        run: |
+          pinned_tools="$ANDROID_HOME/cmdline-tools/15859902"
+          test -x "$pinned_tools/bin/avdmanager"
+          if [[ -e "$ANDROID_HOME/cmdline-tools/latest" ]]; then
+            mv "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/cmdline-tools/runner-preinstalled"
+          fi
+          ln -s "$pinned_tools" "$ANDROID_HOME/cmdline-tools/latest"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --version
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
         with:
-          build-root-directory: meshlight/android-app
           cache-read-only: ${{ github.event_name == 'pull_request' }}
+      - name: Build instrumentation APKs before starting the emulator
+        working-directory: meshlight/android-app
+        run: |
+          bash ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest \
+            --no-configuration-cache --max-workers=2 --console=plain \
+            2>&1 | tee ../build/android-device-build.log
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -383,10 +398,12 @@ jobs:
           api-level: '37.0'
           target: google_apis
           arch: x86_64
+          avd-name: meshlight-api37
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -camera-back none
           working-directory: meshlight/android-app
+          pre-emulator-launch-script: python3 ../scripts/android_ci.py verify-avd --name meshlight-api37 --output ../build/android-avd.json
           script: python3 ../scripts/android_ci.py run-device --app . --output ../build
       - name: Validate instrumentation reports
         run: python3 meshlight/scripts/android_ci.py stage-device --app meshlight/android-app --output meshlight/build/android-device.json
@@ -404,7 +421,9 @@ jobs:
           name: android-device-results
           path: |
             meshlight/build/android-device.log
+            meshlight/build/android-device-build.log
             meshlight/build/android-logcat.log
+            meshlight/build/android-avd.json
             meshlight/android-app/app/build/reports/androidTests/
             meshlight/android-app/app/build/outputs/androidTest-results/
           overwrite: true

@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from android_ci import (APK_NAMES, CHECKSUMS, FILES, METADATA, complete, junit, package,
-                        plan, reuse, run_device, source_info, stage_host, subtree, validate)
+                        plan, reuse, run_device, source_info, stage_host, subtree, validate, verify_avd)
 from android_fixtures import artifact, checksums
 from ci import metadata, prepare
 from version import git
@@ -361,6 +361,29 @@ class ReportAndGateTests(unittest.TestCase):
             run_device(self.root, self.root / "logs")
         self.assertEqual(run.call_args.args[0], ["adb", "logcat", "-d"])
         self.assertTrue((self.root / "logs/android-logcat.log").exists())
+
+    def test_zero_exit_without_executed_instrumentation_is_rejected_and_logged(self):
+        with patch("android_ci.subprocess.run") as run, self.assertRaisesRegex(ValueError, "Missing or empty"):
+            run_device(self.root, self.root / "logs")
+        self.assertEqual(run.call_args.args[0], ["adb", "logcat", "-d"])
+        self.assertTrue((self.root / "logs/android-device.log").exists())
+
+    def test_api_37_avd_requires_correct_target_and_image_before_boot(self):
+        config = self.root / "meshlight-api37.avd/config.ini"
+        config.parent.mkdir()
+        config.write_text("image.sysdir.1=system-images/android-37.0/google_apis/x86_64/\n")
+        identity = self.root / "meshlight-api37.ini"
+        output = self.root / "avd.json"
+        with patch.dict(os.environ, {"ANDROID_HOME": str(self.root / "sdk")}):
+            identity.write_text("target=android-0\n")
+            with self.assertRaisesRegex(ValueError, "Incorrect Android AVD"):
+                verify_avd(self.root, "meshlight-api37", output)
+            self.assertEqual(json.loads(output.read_text())["target"], "android-0")
+            identity.write_text("target=android-37.0\n")
+            self.assertEqual(verify_avd(self.root, "meshlight-api37", output)["target"], "android-37.0")
+            config.write_text("image.sysdir.1=system-images/android-36/google_apis/x86_64/\n")
+            with self.assertRaisesRegex(ValueError, "Incorrect Android AVD"):
+                verify_avd(self.root, "meshlight-api37", output)
 
     def jobs(self, mode):
         results = {name: {"result": "success"} for name in ("metadata", "build", "tests", "android-plan", "android-host", "android-device", "android-artifacts")}
