@@ -3,7 +3,6 @@
 #include "internal.h"
 #include "storage/storage.h"
 #include <zephyr/bluetooth/bluetooth.h>
-#include <zephyr/bluetooth/conn.h>
 #include <zephyr/logging/log.h>
 #if defined(CONFIG_BOARD_NUCLEO_WB55RG)
 #include "platform/stm32wb.h"
@@ -12,26 +11,11 @@
 LOG_MODULE_REGISTER(meshlight_mesh);
 static bool bluetooth_ready, mesh_ready;
 
-static void connected(struct bt_conn *conn, uint8_t error)
-{
-	ARG_UNUSED(conn);
-	LOG_INF("BLE connection opened (status 0x%02x)", error);
-}
-
-static void disconnected(struct bt_conn *conn, uint8_t reason)
-{
-	ARG_UNUSED(conn);
-	LOG_INF("BLE connection closed (reason 0x%02x)", reason);
-}
-BT_CONN_CB_DEFINE(mesh_connection_callbacks) = {.connected = connected, .disconnected = disconnected};
-
 int mesh_init(void)
 {
 	int err = storage_init();
 
 	if (!err) {
-		LOG_INF("Crypto resources: heap=%u bytes, PSA key slots=%u",
-			CONFIG_MBEDTLS_HEAP_SIZE, CONFIG_MBEDTLS_PSA_KEY_SLOT_COUNT);
 		err = mesh_provisioning_init();
 	}
 	if (!err) {

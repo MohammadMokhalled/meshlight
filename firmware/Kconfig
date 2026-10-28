@@ -22,6 +22,28 @@ config MESHLIGHT_MODEL_ID
 	hex "Meshlight vendor model identifier"
 	default 0x0001
 	range 0x0000 0xffff
+
+config MESHLIGHT_STM32WB_RNG_FIX
+	bool "Protect STM32WB RNG clock and register access from CPU2"
+	depends on BOARD_NUCLEO_WB55RG && BT_STM32_IPM && ENTROPY_STM32_RNG
+	default y
+	help
+	  Correct the NCS 3.3.0 entropy driver's acquire order for the shared RNG.
+	  Take the RNG hardware semaphore and restore its source clock before
+	  accessing registers. CPU2 can switch that source clock off between uses.
+	  The build generates a corrected driver without changing the SDK checkout.
+
+config MESHLIGHT_STM32WB_PROXY_TX_FIX
+	bool "Complete failed advertising sends after a GATT proxy start"
+	depends on BOARD_NUCLEO_WB55RG && BT_STM32_IPM && BT_MESH_ADV_EXT && BT_MESH_GATT_PROXY
+	default y
+	help
+	  Correct the NCS 3.3.0 mesh advertiser's failure callback when GATT has
+	  already started the same packet. Without completion, a segmented reply
+	  can remain stuck after the controller rejects advertising. Report the
+	  actual advertising error and let transport continue or retry. The build
+	  generates a corrected advertiser without changing the SDK checkout.
+
 endif
 
 menu "Lighting"

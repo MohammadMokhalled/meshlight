@@ -56,6 +56,14 @@ for installation prerequisites and device-specific addresses.
 
 The platform adapter retains HCI-only initialization, background scanning,
 one shared advertising set, and ST's extended-controller RAM/mailbox layout.
+Two board-local SDK corrections protect shared RNG clock/register access with
+hardware semaphores and complete failed advertising sends after GATT has started
+the same packet. Both are enabled by default for WB55 and generate corrected
+sources in the build directory without modifying the installed SDK. Keep these
+corrections when updating firmware; review their source matching when upgrading
+the SDK. WB55 requests a four-second peripheral supervision timeout to tolerate
+brief radio contention.
+
 WB55 software P-256 uses a 16 KiB crypto heap. For ST-LINK UART, fit the board's
 JP5 TX/RX jumpers and use 115200 baud, 8N1, with flow control disabled.
 

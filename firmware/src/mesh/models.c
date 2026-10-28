@@ -135,12 +135,6 @@ static int standard(const struct bt_mesh_model *model, struct bt_mesh_msg_ctx *c
 			op, ctx->addr, ctx->recv_dst, err);
 		return err;
 	}
-	if (!level) {
-		/* Addresses and key indices are useful diagnostics; never log key material. */
-		LOG_INF("OnOff %s: src=0x%04x dst=0x%04x AppKey=0x%03x present=%u",
-			op == MESH_ONOFF_GET ? "Get" : "Set", ctx->addr, ctx->recv_dst,
-			ctx->app_idx, response[0]);
-	}
 	if (acknowledge) {
 		bt_mesh_model_msg_init(&message, level ? LEVEL_STATUS : ONOFF_STATUS);
 		net_buf_simple_add_mem(&message, response, length);

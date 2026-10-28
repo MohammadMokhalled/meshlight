@@ -15,12 +15,8 @@ LOG_MODULE_REGISTER(mesh_stm32wb);
  */
 SHCI_CmdStatus_t __wrap_SHCI_C2_BLE_Init(SHCI_C2_Ble_Init_Cmd_Packet_t *packet)
 {
-	SHCI_CmdStatus_t status;
-
 	packet->Param.Options |= SHCI_C2_BLE_INIT_OPTIONS_LL_ONLY;
-	status = __real_SHCI_C2_BLE_Init(packet);
-	LOG_INF("CPU2 HCI-only initialization status: 0x%02x", status);
-	return status;
+	return __real_SHCI_C2_BLE_Init(packet);
 }
 
 int mesh_stm32wb_configure_radio(void)
@@ -37,6 +33,8 @@ int mesh_stm32wb_configure_radio(void)
 	}
 	net_buf_add_mem(command, parameters, sizeof(parameters));
 	err = bt_hci_cmd_send_sync(BT_OP(BT_OGF_VS, 0x000c), command, NULL);
-	LOG_INF("CPU2 background scanning configuration: %d", err);
+	if (err) {
+		LOG_ERR("CPU2 background scan setup failed (%d)", err);
+	}
 	return err;
 }
