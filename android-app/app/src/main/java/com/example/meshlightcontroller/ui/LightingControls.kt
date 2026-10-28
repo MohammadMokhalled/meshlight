@@ -97,14 +97,14 @@ fun ColorEditor(
     var hex by remember(rgb) { mutableStateOf(rgb?.hex.orEmpty()) }
     Column(modifier,verticalArrangement=Arrangement.spacedBy(12.dp)) {
         SectionLabel(stringResource(R.string.color)) {
-            if(rgb!=null) ActionIcon(Glyph.HEART,if(rgb in favoriteColors) R.string.remove_color else R.string.save_color,{onFavorite(rgb)},selected=rgb in favoriteColors,enabled=enabled)
+            ActionIcon(Glyph.HEART,if(rgb in favoriteColors) R.string.remove_color else R.string.save_color,{rgb?.let(onFavorite)},selected=rgb in favoriteColors,enabled=enabled&&rgb!=null)
         }
-        if(mixed) Text(stringResource(R.string.mixed_color_help),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        if(rgb==null) Text(stringResource(R.string.unknown),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         val hues=remember { (0..6).map { Color.hsv(it*60f,1f,1f) } }
         ColorSlider(stringResource(R.string.color_hue),hue,0f..360f,hues,enabled,{hue=it;onChange(selected(),false)},{onChange(selected(),true)})
         ColorSlider(stringResource(R.string.color_saturation),saturation,0f..1f,listOf(Color.hsv(hue,0f,value),Color.hsv(hue,1f,value)),enabled,{saturation=it;onChange(selected(),false)},{onChange(selected(),true)})
         ColorSlider(stringResource(R.string.color_value),value,0f..1f,listOf(Color.Black,Color.hsv(hue,saturation,1f)),enabled,{value=it;onChange(selected(),false)},{onChange(selected(),true)})
+        if(mixed) Text(stringResource(R.string.mixed_color_help),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        if(rgb==null) Text(stringResource(R.string.unknown),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         val essentials=remember { listOf(Rgb(255,188,119),Rgb(255,115,84),Rgb(233,115,171),Rgb(159,139,233),Rgb(115,180,244),Rgb(126,207,167),Rgb.White) }
         ColorSwatches(essentials,enabled=enabled,onColor={onChange(it,true)})
         if(favoriteColors.isNotEmpty()) { Text(stringResource(R.string.favorite_colors),style=MaterialTheme.typography.labelLarge); ColorSwatches(favoriteColors,enabled=enabled,onColor={onChange(it,true)}) }

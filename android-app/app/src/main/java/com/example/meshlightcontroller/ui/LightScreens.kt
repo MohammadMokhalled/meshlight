@@ -140,20 +140,20 @@ fun LightDetailScreen(node: NodeInfo, state: ControllerState, modifier: Modifier
             }
         }
         item { LightOrb(draft.rgb ?: observation?.state?.rgb,Modifier.fillMaxWidth().height(148.dp),draft.power ?: observation?.state?.power) }
+        if(node.stage==SetupStage.READY) item(key="controls") {
+            LightingControls(observation,Modifier.padding(horizontal=24.dp),draft,node.capabilities,state.installation?.favoriteColors.orEmpty(),state.installation?.recentColors.orEmpty(),enabled=!state.readOnly,
+                onFavorite={onAction(UiAction.FavoriteColor(it))}) { patch,final ->
+                if(final || fade==0L || patch.rgb!=null) onAction(UiAction.EditLight(node.uuid,setOf(LedTarget.All),patch,final,if(final && patch.rgb==null) fade else 0))
+            }
+        }
         node.transition?.let {transition -> item {TransitionNotice(transition,Modifier.padding(horizontal=24.dp))}}
         if(state.connection!=ConnectionStatus.CONNECTED && !state.readOnly) item { InfoCard(stringResource(R.string.offline_preview),Modifier.padding(horizontal=24.dp)) { TextButton({onAction(UiAction.Connect)}) {Text(stringResource(R.string.connect))} } }
-        if(node.drafts.isNotEmpty()) item {
+        if(node.drafts.keys.any { "${node.uuid}/$it" !in state.pendingTargets }) item {
             InfoCard(stringResource(R.string.draft_pending),Modifier.padding(horizontal=24.dp)) {
                 Row {
                     Button({onAction(UiAction.ApplyDrafts(node.uuid))},enabled=!state.readOnly && state.connection==ConnectionStatus.CONNECTED) {Text(stringResource(R.string.apply_changes))}
                     TextButton({onAction(UiAction.DiscardDrafts(node.uuid))}) {Text(stringResource(R.string.discard))}
                 }
-            }
-        }
-        if(node.stage==SetupStage.READY) item {
-            LightingControls(observation,Modifier.padding(horizontal=24.dp),draft,node.capabilities,state.installation?.favoriteColors.orEmpty(),state.installation?.recentColors.orEmpty(),enabled=!state.readOnly,
-                onFavorite={onAction(UiAction.FavoriteColor(it))}) { patch,final ->
-                if(final || fade==0L || patch.rgb!=null) onAction(UiAction.EditLight(node.uuid,setOf(LedTarget.All),patch,final,if(final && patch.rgb==null) fade else 0))
             }
         }
         if(node.capabilities?.supportsIndexed==true) item {

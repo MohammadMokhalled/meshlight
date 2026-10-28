@@ -81,16 +81,16 @@ fun RoomDetailScreen(room: RoomInfo, state: ControllerState, modifier: Modifier 
             room.failures.values.distinct().forEach {Text(it,style=MaterialTheme.typography.bodySmall)}
             Button({onAction(UiAction.RetryRoom(room.address))},enabled=!state.readOnly) {Text(stringResource(R.string.retry))}
         }}
+        if(!room.deleting) item(key="controls") {
+            LightingControls(observation,Modifier.padding(horizontal=24.dp),room.draft,capabilities=sharedCapabilities(members),favoriteColors=state.installation?.favoriteColors.orEmpty(),recentColors=state.installation?.recentColors.orEmpty(),enabled=!state.readOnly&&!partial&&members.isNotEmpty(),
+                onFavorite={onAction(UiAction.FavoriteColor(it))}) {patch,final->onAction(UiAction.EditRoom(room.address,patch,final))}
+        }
         if(room.controlFailures.isNotEmpty()) item {
             InfoCard(stringResource(R.string.room_verification_help),Modifier.padding(horizontal=24.dp),error=true) {
                 room.controlFailures.values.distinct().forEach {Text(it,style=MaterialTheme.typography.bodySmall)}
             }
         }
-        if(!room.deleting) item {
-            LightingControls(observation,Modifier.padding(horizontal=24.dp),room.draft,capabilities=sharedCapabilities(members),favoriteColors=state.installation?.favoriteColors.orEmpty(),recentColors=state.installation?.recentColors.orEmpty(),enabled=!state.readOnly&&!partial&&members.isNotEmpty(),
-                onFavorite={onAction(UiAction.FavoriteColor(it))}) {patch,final->onAction(UiAction.EditRoom(room.address,patch,final))}
-        }
-        if(!room.draft.isEmpty) item {InfoCard(stringResource(if(state.connection==ConnectionStatus.CONNECTED) R.string.draft_pending else R.string.offline_preview),Modifier.padding(horizontal=24.dp)) {
+        if(!room.draft.isEmpty && "room:${room.address}/${LedTarget.All}" !in state.pendingTargets) item {InfoCard(stringResource(if(state.connection==ConnectionStatus.CONNECTED) R.string.draft_pending else R.string.offline_preview),Modifier.padding(horizontal=24.dp)) {
             Button({onAction(UiAction.ApplyRoomDraft(room.address))},enabled=state.connection==ConnectionStatus.CONNECTED&&!partial&&!state.readOnly){Text(stringResource(R.string.apply_changes))}
         }}
         item {Text(stringResource(R.string.uniform_room_note),Modifier.padding(horizontal=24.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}

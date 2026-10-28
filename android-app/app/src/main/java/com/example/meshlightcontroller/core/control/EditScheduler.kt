@@ -73,14 +73,16 @@ class EditScheduler(
 
     fun isCurrent(edit: ScheduledEdit): Boolean = synchronized(pending) { revisions[edit.key] == edit.revision }
     fun supersede(key: EditKey): Long = synchronized(pending) {
+        val id = ++revision
+        revisions[key] = id
         pending.remove(key)
         if (active?.first?.key == key) active?.second?.cancel()
-        (++revision).also { revisions[key] = it }
+        id
     }
     fun cancel() = synchronized(pending) {
         pending.clear()
-        active?.second?.cancel()
         revisions.keys.toList().forEach { revisions[it] = ++revision }
+        active?.second?.cancel()
     }
     // Retain final intent for reconnect while cancelling packets tied to the old link.
     fun interrupt(): List<ScheduledEdit> = synchronized(pending) {

@@ -457,7 +457,10 @@ class LightingRepository @Inject constructor(
     internal fun checkEditable() { check(!state.value.readOnly) { "This network has been transferred" } }
     internal fun token(key: EditKey) = "${key.nodeUuid}/${key.target}"
     internal fun safe(error: Throwable) = error.message?.replace(Regex("(?i)[0-9a-f]{32,}"), "[redacted]") ?: "Operation failed"
-    internal fun message(error: Throwable) { mutableState.update { it.copy(error = safe(error), loading = false, diagnostics = (listOf(safe(error)) + it.diagnostics).take(100)) } }
+    internal fun message(error: Throwable) {
+        if (error is CancellationException) return
+        mutableState.update { it.copy(error = safe(error), loading = false, diagnostics = (listOf(safe(error)) + it.diagnostics).take(100)) }
+    }
 
     internal fun startOperation(kind: OperationKind, total: Int = 1, block: suspend LightingRepository.() -> Unit): Job {
         val previous = operationJob

@@ -292,6 +292,7 @@
     <string name="capture_color_only">Color only</string>
     <string name="capture_full">Color, brightness, and power</string>
     <string name="pending_changes_count">%1$d pending edits</string>
+    <string name="sending_changes">Sending…</string>
     <string name="save_pattern">Save pattern</string>
     <string name="reading">Reading…</string>
     <string name="room_delete_pending">Removing room…</string>

@@ -83,7 +83,8 @@ class MeshViewModel @Inject constructor(
                 is UiAction.Appearance -> viewModelScope.launch { preferencesStore.appearance(action.theme, action.dynamic) }
                 is UiAction.Vendor -> viewModelScope.launch { preferencesStore.vendor(action.company, action.model) }
             }
-        } catch (error: Exception) { repository.message(error) }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (error: Exception) { repository.message(error) }
     }
 
     fun prepareExport(type: ExportType, password: String): Boolean {

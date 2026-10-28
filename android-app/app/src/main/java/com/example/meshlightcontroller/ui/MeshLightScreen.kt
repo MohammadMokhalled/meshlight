@@ -70,6 +70,12 @@ fun MeshLightScreen(
     val latestImport by rememberUpdatedState(onImport)
     val latestNavigate by rememberUpdatedState(navigate)
     val latestBack by rememberUpdatedState(back)
+    val snackbar=remember(networkId) {SnackbarHostState()}
+    LaunchedEffect(snackbar,state.error) {
+        val error=state.error ?: return@LaunchedEffect
+        snackbar.showSnackbar(error,withDismissAction=true,duration=SnackbarDuration.Long)
+        latestAction(UiAction.DismissError)
+    }
     val entryProvider: (Route)->NavEntry<Route> = {route ->
         val metadata=when(route.type) {
             "lights" -> ListDetailSceneStrategy.listPane(detailPlaceholder={EmptyState(stringResource(R.string.choose_light),"",Modifier.fillMaxHeight(),Glyph.LIGHT)})
@@ -122,10 +128,11 @@ fun MeshLightScreen(
                 if(state.installation!=null) Column(Modifier.statusBarsPadding().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))) {
                     Row(Modifier.fillMaxWidth().padding(start=24.dp,end=8.dp,top=8.dp,bottom=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.app_name),style=MaterialTheme.typography.titleLarge)
+                            Text(stringResource(R.string.app_name),style=MaterialTheme.typography.titleLarge,maxLines=1,overflow=TextOverflow.Ellipsis)
                             Text(state.installation.name,style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1,overflow=TextOverflow.Ellipsis)
                         }
-                        ConnectionBadge(state.connection,demo=state.demo,onConnect={onAction(UiAction.Connect)})
+                        ConnectionBadge(state.connection,demo=state.demo,pendingCount=state.pendingTargets.size,
+                            onCancel={onAction(UiAction.CancelOperation)},onConnect={onAction(UiAction.Connect)})
                         ActionIcon(Glyph.SETTINGS,R.string.settings,{navigate(Route("settings"))})
                     }
                     if(state.demo) Surface(color=MaterialTheme.colorScheme.secondaryContainer) {
@@ -136,6 +143,10 @@ fun MeshLightScreen(
                     }
                 }
             },
+            snackbarHost={
+                if(state.error!=null) SnackbarHost(snackbar)
+                else state.operation?.let {OperationCard(it,Modifier.padding(horizontal=16.dp,vertical=8.dp),onAction)}
+            },
             bottomBar={
                 if(!wide&&state.installation!=null) NavigationBar(containerColor=MaterialTheme.colorScheme.surfaceContainerLow) {
                     roots.forEachIndexed {index,label->NavigationBarItem(selected=tab==index,onClick={tab=index},icon={MeshIcon(glyphs[index])},label={Text(stringResource(label))})}
@@ -143,11 +154,6 @@ fun MeshLightScreen(
             }
         ) {padding ->
             Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
-                state.operation?.let {OperationCard(it,Modifier.padding(horizontal=16.dp,vertical=4.dp),onAction)}
-                if(state.pendingTargets.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal=24.dp),verticalAlignment=Alignment.CenterVertically) {
-                    Text(stringResource(R.string.pending_changes_count,state.pendingTargets.size),Modifier.weight(1f),style=MaterialTheme.typography.labelSmall)
-                    TextButton({onAction(UiAction.CancelOperation)}) {Text(stringResource(R.string.cancel))}
-                }
                 if(state.readOnly) InfoCard(stringResource(R.string.transferred_body),Modifier.padding(horizontal=16.dp,vertical=4.dp),error=true)
                 when {
                     state.loading -> Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {CircularProgressIndicator()}
@@ -167,9 +173,6 @@ fun MeshLightScreen(
                 }
             }
         }
-    }
-    state.error?.let {error ->
-        AlertDialog(onDismissRequest={onAction(UiAction.DismissError)},title={Text(stringResource(R.string.error_title))},text={Text(error)},confirmButton={TextButton({onAction(UiAction.DismissError)}){Text(stringResource(R.string.close))}})
     }
 }
 

@@ -9,6 +9,46 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SchedulerTest {
+    @Test fun cancellingAnActiveEditDoesNotReportACoroutineFailure() = runTest {
+        val completions = mutableListOf<Throwable?>()
+        val scope = CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
+        val scheduler = EditScheduler(scope, { awaitCancellation() }, { _, error -> completions += error })
+        scheduler.enqueue(EditKey("a", 0), LightingPatch(intensity = 19), true)
+        scheduler.cancel()
+        runCurrent()
+        assertTrue("Cancelled work must not reach the failure callback: $completions", completions.isEmpty())
+    }
+
+    @Test fun supersedingAnActiveEditDoesNotReportACoroutineFailure() = runTest {
+        val completions = mutableListOf<Throwable?>()
+        val scope = CoroutineScope(backgroundScope.coroutineContext + UnconfinedTestDispatcher(testScheduler))
+        val scheduler = EditScheduler(scope, { awaitCancellation() }, { _, error -> completions += error })
+        val key = EditKey("a", 0)
+        scheduler.enqueue(key, LightingPatch(intensity = 19), true)
+        scheduler.supersede(key)
+        runCurrent()
+        assertTrue("Superseded work must not reach the failure callback: $completions", completions.isEmpty())
+    }
+
+    @Test fun realFailuresAreReportedAndLaterEditsStillComplete() = runTest {
+        val completions = mutableListOf<Pair<ScheduledEdit, Throwable?>>()
+        val scope = CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job]))
+        val failure = IllegalStateException("Light did not respond")
+        val scheduler = EditScheduler(scope, { edit ->
+            if (edit.patch.intensity == 19) throw failure
+        }, { edit, error -> completions += edit to error })
+        val key = EditKey("a", 0)
+        scheduler.enqueue(key, LightingPatch(intensity = 19), true)
+        runCurrent()
+        assertTrue(completions.single().second is IllegalStateException)
+        assertEquals(failure.message, completions.single().second?.message)
+        scheduler.enqueue(key, LightingPatch(intensity = 80), true)
+        runCurrent()
+        assertEquals(2, completions.size)
+        assertNull(completions.last().second)
+        assertEquals(LightingPatch(intensity = 80), completions.last().first.patch)
+    }
+
     @Test fun interruptionRetainsCurrentFinalsAndResumesWithoutCancellationFailures() = runTest {
         val attempts = mutableListOf<EditKey>()
         val completed = mutableListOf<ScheduledEdit>()

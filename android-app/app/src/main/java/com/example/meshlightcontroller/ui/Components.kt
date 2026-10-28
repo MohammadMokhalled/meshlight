@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.meshlightcontroller.R
 import com.example.meshlightcontroller.core.model.*
@@ -131,8 +132,9 @@ fun LightOrb(rgb: Rgb?, modifier: Modifier = Modifier, powered: Boolean? = true)
 }
 
 @Composable
-fun ConnectionBadge(status: ConnectionStatus, modifier: Modifier = Modifier, demo: Boolean = false, onConnect: () -> Unit = {}) {
+fun ConnectionBadge(status: ConnectionStatus, modifier: Modifier = Modifier, demo: Boolean = false, pendingCount: Int = 0, onCancel: () -> Unit = {}, onConnect: () -> Unit = {}) {
     val label = when {
+        pendingCount>0 -> R.string.sending_changes
         demo -> R.string.demo
         status==ConnectionStatus.CONNECTED -> R.string.connected
         status==ConnectionStatus.CONNECTING -> R.string.connecting
@@ -141,10 +143,17 @@ fun ConnectionBadge(status: ConnectionStatus, modifier: Modifier = Modifier, dem
         status==ConnectionStatus.PERMISSION_REQUIRED -> R.string.permission_required
         else -> R.string.offline
     }
-    Surface(onClick=onConnect,modifier=modifier.heightIn(min=48.dp),shape=CircleShape,color=MaterialTheme.colorScheme.surfaceContainerHigh) {
+    val pendingDescription=stringResource(R.string.pending_changes_count,pendingCount)
+    val cancelDescription=stringResource(R.string.cancel_pending)
+    val feedback=if(pendingCount>0) Modifier.semantics {stateDescription=pendingDescription;contentDescription=cancelDescription} else Modifier
+    Surface(onClick=if(pendingCount>0) onCancel else onConnect,modifier=modifier.heightIn(min=48.dp).then(feedback),shape=CircleShape,color=MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.heightIn(min=48.dp).padding(horizontal=12.dp,vertical=12.dp),horizontalArrangement=Arrangement.spacedBy(6.dp),verticalAlignment=Alignment.CenterVertically) {
-            Box(Modifier.size(6.dp).background(if(status==ConnectionStatus.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,CircleShape))
-            Text(stringResource(label),style=MaterialTheme.typography.labelMedium)
+            Box(Modifier.size(if(pendingCount>0) 16.dp else 6.dp),contentAlignment=Alignment.Center) {
+                if(pendingCount>0) CircularProgressIndicator(Modifier.size(14.dp),strokeWidth=2.dp)
+                else Box(Modifier.size(6.dp).background(if(status==ConnectionStatus.CONNECTED) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,CircleShape))
+            }
+            Text(stringResource(label),style=MaterialTheme.typography.labelMedium,maxLines=1,overflow=TextOverflow.Ellipsis)
+            if(pendingCount>0) MeshIcon(Glyph.CLOSE,Modifier.size(16.dp))
         }
     }
 }

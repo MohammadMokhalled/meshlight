@@ -53,7 +53,7 @@ fun StripScreen(node: NodeInfo, state: ControllerState, modifier: Modifier = Mod
             else LightingControls(observation,draft=draft,capabilities=node.capabilities,favoriteColors=state.installation?.favoriteColors.orEmpty(),recentColors=state.installation?.recentColors.orEmpty(),enabled=!state.readOnly,
                 onFavorite={onAction(UiAction.FavoriteColor(it))}) {patch,final -> onAction(UiAction.EditLight(node.uuid,selected,patch,final))}
             Text(stringResource(R.string.all_edit_help),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            if(node.drafts.isNotEmpty()) {
+            if(node.drafts.keys.any { "${node.uuid}/$it" !in state.pendingTargets }) {
                 Button({onAction(UiAction.ApplyDrafts(node.uuid))},enabled=state.connection==ConnectionStatus.CONNECTED&&!state.readOnly) {Text(stringResource(R.string.apply_changes))}
                 TextButton({onAction(UiAction.DiscardDrafts(node.uuid))}) {Text(stringResource(R.string.discard))}
             }
@@ -112,7 +112,16 @@ fun StripScreen(node: NodeInfo, state: ControllerState, modifier: Modifier = Mod
             }
         }
     }
-    if(showControls) ModalBottomSheet(onDismissRequest={showControls=false}) {Box(Modifier.fillMaxWidth().heightIn(max=650.dp)) {controls()}}
+    if(showControls) ModalBottomSheet(onDismissRequest={showControls=false}) {
+        Box(Modifier.fillMaxWidth().height(650.dp)) {
+            controls()
+            state.error?.let {error ->
+                Snackbar(Modifier.align(Alignment.BottomCenter).padding(16.dp),action={
+                    TextButton({onAction(UiAction.DismissError)}) {Text(stringResource(R.string.dismiss))}
+                }) {Text(error)}
+            }
+        }
+    }
     if(range) LedRangeDialog(count,{range=false}) {start,end -> selected=(start..end).toSet();multiSelect=true;range=false}
     if(saveZone) NameDialog(stringResource(R.string.create_zone),stringResource(R.string.zone_name),stringResource(R.string.default_zone),{saveZone=false}) {onAction(UiAction.SaveZone(it,refs));saveZone=false}
     if(savePreset) NameDialog(stringResource(R.string.capture_look),stringResource(R.string.preset_name),stringResource(R.string.untitled_preset),{savePreset=false}) {onAction(UiAction.CapturePreset(it,refs));savePreset=false}

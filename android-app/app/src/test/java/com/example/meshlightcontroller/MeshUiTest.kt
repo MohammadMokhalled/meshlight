@@ -44,6 +44,7 @@ class MeshUiTest {
         val node=state.installation!!.nodes.first().copy(drafts=mapOf(LedTarget.All to LightingPatch(rgb=Rgb(1,2,3))))
         val actions=mutableListOf<UiAction>()
         compose.setContent {MeshLightControllerTheme {Surface {LightDetailScreen(node,state,onAction={actions+=it},onNavigate={},onBack={})}}}
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Apply changes"))
         compose.onNodeWithText("Apply changes").assertIsNotEnabled()
         compose.onNodeWithText("Discard preview").performClick()
         assertTrue(actions.any {it is UiAction.DiscardDrafts})
