@@ -1,12 +1,12 @@
 # Testing
 
-[Project overview](../README.md) · [Setup and wiring](setup.md) · [Lighting API](lighting.md) · [CI and releases](ci.md)
+[Project overview](../README.md) · [Setup and wiring](00-setup.md) · [Lighting API](02-lighting.md) · [CI and releases](06-ci.md)
 
 The tests compile the production lighting module against fake Zephyr strip
 devices. They exercise state, rendering, concurrency, and scheduling without
 physical LEDs. QEMU is the firmware test platform used by CI.
 
-## Automated coverage
+## 1. Automated coverage
 
 | Suite | Scenarios | Cases per scenario | Total |
 | --- | --- | --- | --- |
@@ -39,9 +39,9 @@ lookup table. Refresh tests use synchronized timestamped history and a 1000 Hz
 test kernel clock with bounded timing tolerances. Production code needs no
 test hooks or runtime worker-stop API.
 
-## Run firmware tests with QEMU
+## 2. Run firmware tests with QEMU
 
-Complete [SDK and workspace setup](setup.md#prepare-the-workspace), including
+Complete [SDK and workspace setup](00-setup.md#2-prepare-the-workspace), including
 the SDK Python environment and `ZEPHYR_BASE`. Commands run from the repository
 root. QEMU must be available to the SDK.
 
@@ -84,7 +84,7 @@ Twister job; each board also builds a capacity overlay in CI (128 LEDs on
 nRF52-DK, 339 on the other boards).
 
 Phone commissioning and physical radio checks remain a separate
-[hardware acceptance checklist](mesh.md#hardware-acceptance-checklist).
+[hardware acceptance checklist](04-mesh.md#7-hardware-acceptance-checklist).
 
 The `mesh_crypto` suite additionally uses real PSA key import and encrypted ITS
 storage. It checks AppKey installation, the separate AppKey configuration
@@ -92,9 +92,9 @@ record, and capacity for both generations of two subnets and two AppKeys. It use
 dedicated simulated Settings partition, including when built for a physical
 board; it never accesses that board's provisioning or lighting records.
 
-## Other firmware checks
+## 3. Other firmware checks
 
-### native_sim on Linux or WSL
+### 3.1. native_sim on Linux or WSL
 
 With the SDK Python environment active, `ZEPHYR_BASE` set, and native simulator
 host dependencies installed:
@@ -105,10 +105,10 @@ python "$ZEPHYR_BASE/scripts/twister" \
   --inline-logs --outdir build/twister-native
 ```
 
-Both suites allow this platform. See the [validation record](validation.md) for
-the local WSL limitation encountered during earlier runs.
+Both suites allow this platform. An earlier local run was blocked because WSL
+could not find its Ubuntu `ext4.vhdx` disk; this was a host setup issue.
 
-### Compile-only checks on application boards
+### 3.2. Compile-only checks on application boards
 
 Only the **manual-mode suite** allows the physical application boards in its
 `testcase.yaml`. Limit discovery to that suite, for example:
@@ -122,11 +122,11 @@ python "$ZEPHYR_BASE/scripts/twister" \
 The other compile-only targets are `nrf52dk/nrf52832`,
 `nrf5340dk/nrf5340/cpuapp`, and `nucleo_wb55rg/stm32wb55xx`.
 The Nucleo also needs the
-STM32 HAL dependency described in [setup](setup.md). The automatic-refresh suite
+STM32 HAL dependency described in [setup](00-setup.md). The automatic-refresh suite
 allows only QEMU and native_sim. Compile-only tests still use a fake strip and
 do not verify SPI or physical output.
 
-## Python tooling and workflow checks
+## 4. Python tooling and workflow checks
 
 Python and Git are sufficient for the versioning and CI tooling tests:
 
@@ -144,7 +144,7 @@ With `actionlint` installed, validate the workflow files:
 actionlint .github/workflows/ci.yml .github/workflows/pr.yml .github/workflows/firmware.yml
 ```
 
-### C and Kconfig style
+### 4.1. C and Kconfig style
 
 From a shell providing Perl and `diff`:
 
@@ -165,18 +165,17 @@ license is in [LICENSE](../LICENSE). License-tag checks are enabled.
 `git diff --check` checks tracked changes; also inspect newly added files for
 whitespace before committing.
 
-## Results and limits
+## 5. Results and limits
 
-The [validation record](validation.md) preserves dated results and local artifact
-paths. CI uploads firmware build logs and Twister reports, including available
+CI uploads firmware build logs and Twister reports, including available
 diagnostics on failure. Emulator tests establish behavior with a fake device;
 they do not establish electrical compatibility, visible output, or scheduling
 bounds on a real board.
 
-## Physical checks
+## 6. Physical checks
 
-Use the selected board and exact strip after following [wiring](setup.md#connections).
-Use the [developer UART shell](storage.md#developer-uart-shell) for manual checks.
+Use the selected board and exact strip after following [wiring](00-setup.md#3-connections).
+Use the [developer UART shell](02-lighting.md#4-developer-uart-shell) for manual checks.
 Unless stated otherwise, these checks assume automatic refresh is enabled.
 
 | Check | Expected result |
@@ -201,5 +200,5 @@ duplicate-write avoidance. Persistence tests use a blocking fake to verify
 setters during I/O, retry scheduling, stale queued callbacks, power-only changes,
 and debounce during continuous edits. Boot fixtures cover current and legacy
 formats, legacy power on/off, zero intensity, missing/malformed/unsupported or
-oversized records, and backend initialization/read errors. See [manual retention checks](storage.md#manual-retention-checks)
+oversized records, and backend initialization/read errors. See [manual retention checks](03-storage.md#6-manual-retention-checks)
 for the hardware power-cycle procedure.

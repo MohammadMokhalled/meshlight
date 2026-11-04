@@ -1,14 +1,23 @@
 # Meshlight
 
-Portable Zephyr firmware for controlling a WS2812 RGB LED strip on Nordic and
-STM32 boards. A shared C module provides per-LED color and intensity, gamma
-correction, and automatic refresh, with hardware configuration kept in devicetree
-overlays.
+Meshlight is Zephyr-based firmware that controls a WS2812 RGB LED strip on a
+Nordic or STM32 board. Each board connects to a Bluetooth Mesh network, where
+you can change the color, brightness, and power of individual LEDs or the whole
+strip from a phone.
 
-**Current scope:** a Bluetooth Mesh lighting node with persistent settings,
-individual LED control, and an optional developer UART shell. Use nRF Mesh for
-provisioning, native power/intensity controls, and raw vendor RGB messages.
-See the [mesh setup and protocol guide](docs/mesh.md).
+You can use the AI-generated [Meshlight Android app](android-app/) to add and control lights.
+
+## The project's purpose
+
+I wanted to learn about BLE mesh. So I decided to define and start a project and why not to share it online. 
+
+Keep in mind that this project was a playground for me to learn BLE mesh. Although I tried my best to keep everything clean, but still some parts might not work ideally. 
+
+## AI usage
+
+Why not to use AI in the aga of AI?
+I used AI in the whole developemnt phase, specially in the unit tests and ci topics but with reviewing the output. 
+The Android app is fully vibe coded because it was not the main goal of the project and also is not my expertise. 
 
 ## What it does
 
@@ -24,18 +33,23 @@ See the [mesh setup and protocol guide](docs/mesh.md).
 - Serializes state updates and transfers with a mutex, using static storage.
 - Builds the same application for four boards with nRF Connect SDK **3.3.0**.
 
-On boot, the application restores the last saved colors and intensities and
-always selects power on. With no valid snapshot it starts white at 50% intensity
-and waits for control input. Color/intensity changes save automatically after
-one second without further edits; continuous edits postpone saving until they stop.
-Power changes are runtime-only.
-See [persistent settings and developer shell](docs/storage.md) for flash layout,
-API contracts, shell commands, and manual retention checks.
+### BLE mesh behavior
+
+On boot, the application initializes Bluetooth Mesh and loads its saved settings.
+If provisioning was restored, the node resumes its existing mesh membership and
+configuration. Otherwise, it enables both advertising and GATT provisioning
+bearers and can be provisioned using No OOB authentication. Its device UUID is
+derived from the hardware identity and remains stable across resets and firmware
+updates. Relay and GATT Proxy are enabled by default; saved mesh configuration
+is restored on ordinary reboots.
+
+Provisioning assigns the node to a network, but a controller must also add an
+Application Key and bind it to the lighting models before controlling them.
+See the [mesh setup and protocol guide](docs/04-mesh.md) for provisioning,
+configuration, and factory reset instructions. If settings or reset recovery
+fails, normal mesh startup stops rather than provisioning with lost keys.
 
 ## Supported hardware
-
-The default configuration is **six LEDs in GRB wire order**. The application API
-always accepts ordinary RGB channels.
 
 | Board | Zephyr build target | Strip data output | Default I/O voltage |
 | --- | --- | --- | --- |
@@ -44,14 +58,9 @@ always accepts ordinary RGB channels.
 | nRF5340-DK (PCA10095) | `nrf5340dk/nrf5340/cpuapp` | GPIO P1.13 / Arduino D11 | 3 V |
 | NUCLEO-WB55RG | `nucleo_wb55rg` | PA7 / Arduino D11 / CN5 pin 4 | 3.3 V |
 
-For a 5 V strip, use a suitable level shifter, a strip power supply, and a common
-ground. Follow [setup and wiring](docs/setup.md) before connecting hardware.
-Board configurations are checked by builds; visible output and
-signal timing still require [physical validation](docs/testing.md#physical-checks).
-
 ## Quick start
 
-First complete [SDK and workspace setup](docs/setup.md#prepare-the-workspace).
+First complete [SDK and workspace setup](docs/00-setup.md#2-prepare-the-workspace).
 Then, from the repository root in an SDK 3.3.0 terminal, build and flash one board:
 
 ```sh
@@ -78,10 +87,86 @@ west build --no-sysbuild -b nucleo_wb55rg -d build/wb55 firmware
 west flash -d build/wb55
 ```
 
-An existing Nordic SDK workspace needs an additional STM32 HAL module for the
-Nucleo build; follow the [existing SDK instructions](docs/setup.md#use-an-existing-nordic-sdk-workspace).
-Use separate build directories for each board. Change `chain-length` in its
-[board overlay](firmware/boards/) to match the actual strip length, then rebuild.
+## How to change configurations
+
+### Change number of LEDs
+
+Open the [board overlay](firmware/boards/) for your target and change
+`chain-length` to match the number of LEDs on the strip. For example:
+
+```dts
+chain-length = <17>;
+```
+
+The default is six LEDs. The firmware supports 1 to 339 LEDs, subject to the
+board's available memory; the nRF52 production build is checked with 128 LEDs
+and its developer-shell build with six. Rebuild and flash using the commands
+in [Quick start](#quick-start). When the count changes, saved settings for
+matching LED indices are restored, new LEDs start white at 50% intensity, and
+extra saved entries are ignored. See [configure the strip](docs/00-setup.md#5-configure-the-strip)
+for board-specific limits, color order, and pin settings.
+
+### Enable developer shell
+
+The UART shell is disabled by default. Build with the supplied configuration
+fragment in a separate build directory, then flash it. For example, for the
+nRF54L15-DK:
+
+```sh
+west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk-dev firmware -- "-DEXTRA_CONF_FILE=dev_shell.conf"
+west flash -d build/dk-dev
+```
+
+For other boards, use their Quick start board target and sysbuild option. An
+existing Nordic SDK workspace needs the [additional STM32 HAL module](docs/00-setup.md#22-use-an-existing-nordic-sdk-workspace)
+for the Nucleo build. Connect a serial terminal to the onboard debugger's virtual
+COM port at **115200 baud, 8N1, with no flow control**, then try `lighting show`.
+See the [developer shell guide](docs/02-lighting.md#4-developer-uart-shell) for the
+available commands and examples.
+
+### Change strip color order or data pin
+
+In the target's [board overlay](firmware/boards/), set `color-mapping` to the
+strip's wire order; the default is GRB. Lighting commands still use RGB values.
+To change the data pin, update the board's pin configuration; Nordic overlays
+have both default and sleep pinctrl groups. Rebuild and flash after editing the
+overlay. Check the board-specific pin restrictions and signal timing in
+[configure the strip](docs/00-setup.md#5-configure-the-strip).
+
+### Adjust refresh and save timing
+
+Build-time application options are defined in [firmware/Kconfig](firmware/Kconfig).
+For example, create `firmware/custom.conf` with the settings you want to change:
+
+```ini
+CONFIG_LIGHTING_REFRESH_INTERVAL_MS=100
+CONFIG_LIGHTING_SAVE_DELAY_MS=2000
+```
+
+Add the fragment to a build using the same `EXTRA_CONF_FILE` argument shown for
+the developer shell, replacing `dev_shell.conf` with `custom.conf`. Rebuild and
+flash the resulting firmware. The defaults are a 50 ms refresh interval and a
+1000 ms quiet period before saving color and intensity changes. The failed-save
+retry delay and worker stack sizes are also configurable. Disabling automatic
+refresh requires application code to call `lighting_apply()`; the default
+application relies on automatic refresh. See [refresh configuration](docs/02-lighting.md#5-refresh-configuration)
+and [persistent settings](docs/03-storage.md) for details.
+
+### Configure Bluetooth Mesh
+
+Relay and GATT Proxy support and their initial states can be changed with
+`CONFIG_BT_MESH_RELAY`, `CONFIG_BT_MESH_RELAY_ENABLED`,
+`CONFIG_BT_MESH_GATT_PROXY`, and `CONFIG_BT_MESH_GATT_PROXY_ENABLED` in a build
+configuration fragment. A provisioner can also configure supported features,
+model bindings, subscriptions, and publication. Saved mesh configuration takes
+precedence over build-time initial-state defaults on ordinary reboots; factory
+reset restores the build defaults.
+
+The vendor model's company and model identifiers are set with
+`CONFIG_MESHLIGHT_COMPANY_ID` and `CONFIG_MESHLIGHT_MODEL_ID`. The default
+company ID `0xFFFF` is a development placeholder; assign the project's company
+ID before distribution. See [Bluetooth Mesh control](docs/04-mesh.md) for setup and
+protocol details.
 
 ## How it is organized
 
@@ -122,7 +207,7 @@ flowchart TD
 
 Setters store requests; the next refresh renders the latest state. A successful
 setter confirms storage. `lighting_apply()` provides a synchronous transfer when
-needed. The [lighting API guide](docs/lighting.md) explains the calls, error handling,
+needed. The [lighting API guide](docs/02-lighting.md) explains the calls, error handling,
 threading contract, and refresh options.
 
 | Location | Responsibility |
@@ -144,12 +229,11 @@ reset recovery, model transactions/transitions, protocol validation, and
 products with and without the shell, and runs the tests in QEMU. Python tests also cover versioning, packaging, report validation, and
 release publication using a mocked GitHub interface.
 
-See [testing](docs/testing.md) for commands and coverage, and the
-[validation record](docs/validation.md) for dated results and hardware limitations.
+See [testing](docs/05-testing.md) for commands, coverage, and hardware limitations.
 
 Versions come from Git history: `master` produces alpha builds, `release/x.y.z`
 produces beta builds, and a `vx.y.z` tag triggers a final GitHub Release after
-validation. See [versioning and CI](docs/ci.md) for downloads and release steps.
+validation. See [versioning and CI](docs/06-ci.md) for downloads and release steps.
 
 ## Project status
 
