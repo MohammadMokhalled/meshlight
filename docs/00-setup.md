@@ -1,8 +1,8 @@
 # Setup and wiring
 
-[Project overview](../README.md) · [Lighting API](lighting.md) · [Testing](testing.md) · [CI and releases](ci.md)
+[Project overview](../README.md) · [Lighting API](02-lighting.md) · [Testing](05-testing.md) · [CI and releases](06-ci.md)
 
-## Prerequisites
+## 1. Prerequisites
 
 Install **nRF Connect SDK 3.3.0** and its matching toolchain, then open an SDK
 terminal. Follow Nordic's [SDK installation guide](https://docs.nordicsemi.com/r/bundle/nrf-connect-vscode/page/get_started/quick_setup.html/installing-sdk-and-toolchain-for-the-first-time)
@@ -14,12 +14,17 @@ tools for the selected board. The Nucleo uses ST-LINK with STM32CubeProgrammer;
 the Nordic boards' default runner uses `nrfutil` with device support. Keep strip
 power separate from the data GPIO and follow the connections below.
 
-## Prepare the workspace
+## 2. Prepare the workspace
 
-Choose one of these two paths. The repository manifest is the reproducible path
-used by CI; an existing Nordic SDK installation can also build the application.
+Choose one of these two setup options:
 
-### Use the repository manifest
+- **Create a new workspace using this repository's manifest (recommended).**
+  The manifest lists the SDK and dependency versions to download, so your build
+  uses the same versions as the project's automated builds (CI).
+- **Use an existing nRF Connect SDK 3.3.0 workspace.** Reuse the SDK and
+  dependencies you already have installed, following the instructions below.
+
+### 2.1. Use the repository manifest
 
 Start in an empty, writable parent directory **outside any existing west
 workspace**. In the SDK 3.3.0 toolchain terminal, run:
@@ -53,7 +58,7 @@ export ZEPHYR_BASE="$(cd ../zephyr && pwd)"
 Keep this terminal open for the build and test commands. A new terminal needs
 the matching SDK toolchain environment and `ZEPHYR_BASE` again.
 
-### Use an existing Nordic SDK workspace
+### 2.2. Use an existing Nordic SDK workspace
 
 Open the existing SDK **3.3.0** terminal, confirm `ZEPHYR_BASE` identifies that
 installation's `zephyr` directory, and change to the Meshlight repository root.
@@ -85,22 +90,20 @@ tar.exe -xzf build/deps/hal_stm32.tar.gz -C build/deps/hal_stm32 --strip-compone
 ```
 
 Run this once, or reuse a directory already prepared at this exact revision.
-Use the extra-module build command in [build and flash](#build-and-flash).
+Use the extra-module build command in [build and flash](#4-build-and-flash).
 This path does not change the SDK installation's manifest.
 
-## Connections
+## 3. Connections
 
 Use the strip's specified supply voltage and a supply rated for the configured
 LED count at maximum output. A usual 5 V WS2812 strip needs a regulated 5 V
-supply; do not power it from a GPIO. Connect board, strip supply, and level
-shifter grounds together. Use a non-inverting level shifter matched to the
-board's actual I/O voltage and the strip's data-input requirements.
+supply but connecting it with 3.3 V, made random color noises to disapear. Do not power it from a GPIO. Connecting board, strip supply, and level
+shifter grounds together is the best final solution. Use a non-inverting level shifter matched to the board's actual I/O voltage and the strip's data-input requirements.
 
-### nRF54L15-DK
+### 3.1. nRF54L15-DK
 
 The DK defaults to **1.8 V I/O**. For a 5 V strip, use a level shifter that
-explicitly supports **1.8 V input and 5 V output**. If the DK supply was changed
-in Board Configurator, select the shifter for that actual voltage. See Nordic's
+explicitly supports **1.8 V input and 5 V output** or change the level of voltage in the nrfConnect and configurator to 3.3 V for the first tests. See Nordic's
 [DK power supply documentation](https://docs.nordicsemi.com/r/bundle/ug_nrf54l15_dk/page/ug/nrf54l15_dk/hw_desription/power_supply.html).
 
 **P1.12 means GPIO port 1, pin 12. It is physical position 15 on the PORT P1
@@ -114,7 +117,7 @@ header.** Nordic lists this mapping in its
 | Strip supply positive | Strip power input at its specified voltage |
 | DK P1.11 | Reserved SPI clock; leave unconnected to the strip |
 
-### nRF52-DK (PCA10040 / nRF52832)
+### 3.2. nRF52-DK (PCA10040 / nRF52832)
 
 Use **GPIO P0.23 / Arduino D11** for strip data. `nrf52dk` here means the
 nRF52832 DK, not an nRF52840 DK. The normal USB-powered DK uses approximately
@@ -129,11 +132,7 @@ maps D11 to P0.23.
 | Strip supply positive | Strip power input at its specified voltage |
 | P0.25 / D13 and P0.24 / D12 | Reserved I2S clocks; leave unconnected |
 
-This board uses the I2S peripheral as a continuous DMA waveform generator.
-The strip still receives ordinary WS2812 data and needs only DIN. This avoids
-gaps between the nRF52832 SPIM peripheral's 255-byte DMA chunks on long strips.
-
-### nRF5340-DK (PCA10095)
+### 3.3. nRF5340-DK (PCA10095)
 
 Use **GPIO P1.13 / Arduino D11** for strip data. P1.13 means GPIO port 1, pin
 13. Match the level shifter to the DK's actual VDD voltage (normally about 3 V
@@ -148,7 +147,7 @@ maps D11 to P1.13.
 | Strip supply positive | Strip power input at its specified voltage |
 | P1.15 / D13 | Reserved SPI clock; leave unconnected |
 
-### NUCLEO-WB55RG
+### 3.4. NUCLEO-WB55RG
 
 Use **Arduino D11 / GPIO PA7 / CN5 pin 4** for data. The board's I/O voltage is
 3.3 V; for a 5 V strip, use a suitable 3.3 V-to-5 V level shifter. ST documents
@@ -162,33 +161,33 @@ the connector mapping in the
 | Strip supply positive | Strip power input at its specified voltage |
 | PA5 / D13 / CN5 pin 6 | Reserved SPI clock; leave unconnected to the strip |
 
-### Common strip wiring
+### 3.5. Common strip wiring
 
 Connect DIN at the input end of the strip; DOUT connects to the next LED. Keep
 the data connection short and follow the strip manufacturer's requirements for
 decoupling, signal series resistance, and power injection. The strip needs no
 MISO or chip select. All board configurations preserve the default UART console.
 
-## Build and flash
+## 4. Build and flash
 
 Run these commands from the **repository root** in the prepared SDK terminal.
 Use a separate build directory for each board.
 
-### nRF54L15-DK
+### 4.1. nRF54L15-DK
 
 ```sh
-west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/dk firmware
-west flash -d build/dk
+west build --no-sysbuild -b nrf54l15dk/nrf54l15/cpuapp -d build/nrf54l15dk firmware
+west flash -d build/nrf54l15dk
 ```
 
-### nRF52-DK
+### 4.2. nRF52-DK
 
 ```sh
 west build --no-sysbuild -b nrf52dk/nrf52832 -d build/nrf52dk firmware
 west flash -d build/nrf52dk
 ```
 
-### nRF5340-DK
+### 4.3. nRF5340-DK
 
 ```sh
 west build --sysbuild -b nrf5340dk/nrf5340/cpuapp -d build/nrf5340dk firmware
@@ -203,7 +202,7 @@ domain for a first installation. The repository's
 the devicetree flash layout; its [radio configuration](../firmware/sysbuild/ipc_radio.conf)
 provides the five advertising sets used by Mesh and GATT Proxy.
 
-### NUCLEO-WB55RG
+### 4.4. NUCLEO-WB55RG
 
 With the repository-manifest workspace:
 
@@ -226,11 +225,11 @@ Startup logs include the resolved firmware
 version and source revision, followed by `Lighting ready` on successful startup.
 Saved lighting state is restored; otherwise the strip starts white at 50%
 intensity with power on. It waits for commands and does not animate.
-For Bluetooth control, follow [Mesh provisioning](mesh.md).
-Enable the [developer shell](storage.md#developer-uart-shell)
+For Bluetooth control, follow [Mesh provisioning](04-mesh.md).
+Enable the [developer shell](02-lighting.md#4-developer-uart-shell)
 for manual control.
 
-## Configure the strip
+## 5. Configure the strip
 
 Board configuration is selected automatically from [firmware/boards/](../firmware/boards/):
 
@@ -251,7 +250,7 @@ Board configuration is selected automatically from [firmware/boards/](../firmwar
 Rebuild after configuration changes. If reusing a build directory after changing
 the board or workspace, pass `-p always` to `west build` for a pristine rebuild.
 Refresh settings are shared application options described in the
-[lighting guide](lighting.md#refresh-configuration).
+[lighting guide](02-lighting.md#5-refresh-configuration).
 
 The nRF52832's 64 KiB RAM limits capacity: its production build is checked with
 **128 LEDs**, and its developer-shell build with **six LEDs**. The other boards
@@ -260,7 +259,7 @@ a fresh RAM-budget review. CI uses [nrf52_long_strip.overlay](../firmware/nrf52_
 for that board's capacity build. The nRF52 shell uses Zephyr's minimal feature
 defaults; the lighting commands remain available.
 
-### Configured signal timing
+### 5.1. Configured signal timing
 
 The following values are calculated from the overlays; they are targets for
 physical measurement.
@@ -277,5 +276,5 @@ Nucleo enables SPI DMA for continuous byte transfers. Strip revisions can have
 different timing limits: measure the waveform and compare it with the exact
 strip's datasheet. Zephyr's
 [WS2812 SPI binding](https://docs.zephyrproject.org/latest/build/dts/api/bindings/led_strip/worldsemi%2Cws2812-spi.html)
-describes the timing properties. Follow the [physical checks](testing.md#physical-checks)
+describes the timing properties. Follow the [physical checks](05-testing.md#6-physical-checks)
 before treating a board/strip combination as validated.

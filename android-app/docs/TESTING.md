@@ -96,7 +96,7 @@ Unchanged PRs skip Android jobs. Unchanged push/tag CI reuses APKs from a
 successful ancestor push run with exactly matching Android source and validated
 checksums/test evidence. If none is available, all Android checks and builds run.
 The required gate rejects unexpected skips or failures. See
-[CI behavior and downloads](../../docs/ci.md#android-validation-and-reuse).
+[CI behavior and downloads](../../docs/06-ci.md#31-android-validation-and-reuse).
 
 The `android-apks` Actions artifact contains both debug and unsigned release
 APKs, original build/test metadata, and SHA-256 checksums. Reports and logs are
