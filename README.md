@@ -5,7 +5,8 @@ Nordic or STM32 board. Each board connects to a Bluetooth Mesh network, where
 you can change the color, brightness, and power of individual LEDs or the whole
 strip from a phone.
 
-You can use the AI-generated [Meshlight Android app](android-app/) to add and control lights.
+You can use the AI-generated [Meshlight Android app](https://github.com/MohammadMokhalled/meshlight-android) to add and control lights.
+It lives in its own repository and is released separately.
 
 ## The project's purpose
 

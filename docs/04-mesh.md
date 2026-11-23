@@ -16,9 +16,16 @@ flowchart LR
 
 | Want to… | Use |
 | --- | --- |
-| Add and control a light with a visual interface | [Meshlight Android app](../android-app/README.md) |
+| Add and control a light with a visual interface | [Meshlight Android app](https://github.com/MohammadMokhalled/meshlight-android) |
 | Send individual LED or RGB commands | [Vendor protocol](#4-vendor-protocol-version-1) |
 | Remove network and lighting settings | [Factory reset](#6-factory-reset-and-recovery) |
+
+Controllers such as the [Android app](https://github.com/MohammadMokhalled/meshlight-android)
+are developed in separate repositories and rely on this node's mesh
+composition: one element with Generic OnOff, Generic Level, Health Server, and
+the Meshlight vendor model, plus the [vendor protocol](#4-vendor-protocol-version-1).
+Treat changes to that composition, the opcodes, or message formats as
+compatibility changes, and note them in the release notes.
 
 Relay and GATT Proxy are enabled by default. Saved mesh settings are restored
 after reboot. An unprovisioned node enables advertising and GATT provisioning
@@ -78,7 +85,7 @@ reach the node.
 
 1. Prepare the SDK, wire the strip, and flash the board using [setup](00-setup.md).
 2. Check the board-specific notes below. Then power on the board.
-3. Add the light using the [Android app](../android-app/README.md#use-the-app).
+3. Add the light using the [Android app](https://github.com/MohammadMokhalled/meshlight-android#use-the-app).
 
 You can also provision the light with nRF Mesh and subscribe it to a group for
 group control.
