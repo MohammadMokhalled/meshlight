@@ -1,8 +1,6 @@
-# Build directories (Zephyr/west, CMake, and Android/Gradle).
-# Keep buildSrc/ and build-logic/ available for Gradle build scripts.
+# Build directories (Zephyr/west and CMake).
 build/
 build-*/
-!build-logic/
 build_*/
 cmake-build-*/
 
@@ -20,24 +18,6 @@ build.ninja
 rules.ninja
 .ninja_deps
 .ninja_log
-
-# Android/Gradle caches, native build output, and local SDK paths.
-.gradle/
-.kotlin/
-.cxx/
-.externalNativeBuild/
-local.properties
-captures/
-*.apk
-*.aab
-*.ap_
-*.hprof
-
-# Local Android signing credentials. Keep these outside version control.
-*.jks
-*.keystore
-keystore.properties
-key.properties
 
 # Python tooling used by Zephyr.
 .venv/

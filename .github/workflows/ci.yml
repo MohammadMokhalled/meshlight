@@ -12,12 +12,10 @@ jobs:
   validate:
     permissions:
       contents: read
-      actions: read
     uses: ./.github/workflows/firmware.yml
     with:
       source-sha: ${{ github.sha }}
       source-ref: ${{ github.ref }}
-      before-sha: ${{ github.event.before }}
 
   publish:
     name: Publish final release
@@ -43,13 +41,9 @@ jobs:
           merge-multiple: true
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          name: android-apks
-          path: build/android-release
-      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
-        with:
           name: build-metadata
           path: build
       - name: Publish complete release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/release.py --metadata build/ci-metadata.json --packages build/release --android build/android-release
+        run: python3 scripts/release.py --metadata build/ci-metadata.json --packages build/release

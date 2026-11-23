@@ -12,7 +12,6 @@ import zipfile
 from pathlib import Path
 
 from version import git, resolve
-from android_ci import source_info
 
 ROOT = Path(__file__).resolve().parents[1]
 IMAGE = ("ghcr.io/nrfconnect/sdk-nrf-toolchain@sha256:"
@@ -60,12 +59,11 @@ def prepare(repo, base=None, head=None):
     return git(repo, "write-tree") if base else git(repo, "rev-parse", "HEAD^{tree}")
 
 
-def metadata(repo, ref, base=None, head=None, pr_number=None, before=None):
+def metadata(repo, ref, base=None, head=None, pr_number=None):
     version = resolve(repo, "refs/heads/master" if base else ref,
                       base or "HEAD", ci=True, pr_number=pr_number, pr_head=head)
     tree = git(repo, "write-tree") if base else git(repo, "rev-parse", "HEAD^{tree}")
     result = dict(version, products=products(repo), tree=tree,
-                  android=source_info(repo, tree, ref, base, before),
                   source_commit=head or version["commit"], base_commit=base,
                   pr_number=pr_number, toolchain_image=IMAGE,
                   sdk="nRF Connect SDK 3.3.0",
@@ -157,6 +155,15 @@ def verify_twister(report, expected):
     print(f"Passed: {len(suites)} scenarios, {total} test cases")
 
 
+REQUIRED_JOBS = ("metadata", "build", "tests")
+
+
+def complete(jobs):
+    """Every validation job must have succeeded; skipped and cancelled jobs are failures."""
+    if set(jobs) != set(REQUIRED_JOBS) or any(jobs[name]["result"] != "success" for name in REQUIRED_JOBS):
+        raise ValueError(f"Validation jobs did not all succeed: {jobs}")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=ROOT)
@@ -170,7 +177,6 @@ def main():
     meta.add_argument("--base")
     meta.add_argument("--head")
     meta.add_argument("--pr-number", type=int)
-    meta.add_argument("--before")
     meta.add_argument("--output", type=Path, required=True)
     pack = commands.add_parser("package")
     pack.add_argument("--metadata", type=Path, required=True)
@@ -181,6 +187,7 @@ def main():
     verify = commands.add_parser("verify-tests")
     verify.add_argument("--report", type=Path, required=True)
     verify.add_argument("--expected", type=Path, required=True)
+    commands.add_parser("complete")
     deps = commands.add_parser("dependencies")
     deps.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
@@ -191,7 +198,7 @@ def main():
                 raise ValueError("Prepared source tree differs from the metadata job")
             print(f"Prepared source tree: {tree}")
         elif args.command == "metadata":
-            result = metadata(args.repo, args.ref, args.base, args.head, args.pr_number, args.before)
+            result = metadata(args.repo, args.ref, args.base, args.head, args.pr_number)
             write_json(args.output, result)
             if "GITHUB_OUTPUT" in os.environ:
                 with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -205,12 +212,14 @@ def main():
             print(package(args.build_dir, args.output_dir, args.product, info, args.dependencies))
         elif args.command == "verify-tests":
             verify_twister(args.report, args.expected)
+        elif args.command == "complete":
+            complete(json.loads(os.environ["RESULTS"]))
         elif args.command == "dependencies":
             result = subprocess.run(["west", "list", "-f", "{name} {revision} {sha}"],
                                     text=True, capture_output=True, check=True)
             write_json(args.output, [dict(zip(("name", "revision", "sha"), line.split()))
                                      for line in result.stdout.splitlines()])
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, KeyError, TypeError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"CI error: {error}\n")
 
 

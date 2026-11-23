@@ -2,8 +2,8 @@
 
 [Project overview](../README.md) · [Setup and wiring](00-setup.md) · [Lighting API](02-lighting.md) · [Mesh protocol](04-mesh.md) · [Storage](03-storage.md)
 
-This guide focuses on the **firmware running on a light**. The Android app is a
-separate controller; it communicates with the firmware over Bluetooth Mesh.
+This guide focuses on the **firmware running on a light**. The [Android app](https://github.com/MohammadMokhalled/meshlight-android) is a
+separate controller, in its own repository; it communicates with the firmware over Bluetooth Mesh.
 
 **The short version:** a command changes the requested lighting state in RAM.
 A refresh thread sends that state to the LEDs, while a separate worker saves
